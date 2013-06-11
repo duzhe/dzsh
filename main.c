@@ -5,6 +5,17 @@
 #include <sys/stat.h>
 #include <errno.h>
 
+const char *getfullpathname(char *pbuf, size_t bufsize, char *name)
+{
+	if (*name == '/') {
+		return name;
+	}
+	getcwd(pbuf, bufsize);
+	strncat(pbuf, "/", bufsize);
+	strncat(pbuf, name, bufsize);
+	return pbuf;
+}
+
 int main(int argc, char **argv)
 {
 	char buf[1024];
@@ -12,6 +23,7 @@ int main(int argc, char **argv)
 	char pathbuf[4096];
 	char *pathentry[32];
 	char *line;
+	const char *pathname;
 	char *tok;
 	char *bin;
 	char *params[256];
@@ -22,6 +34,7 @@ int main(int argc, char **argv)
 	const char *PS1;
 	const char *PATH;
 	int pid;
+	FILE *instream;
 
 	IFS = getenv("IFS");
 	if (IFS == NULL) {
@@ -29,6 +42,24 @@ int main(int argc, char **argv)
 	}
 	PS1 = getenv("PS1");
 	PATH = getenv("PATH");
+
+	/* parse commandline */
+	if (argc == 1) {
+		instream = stdin;
+	}
+	else {
+		if (argc > 2) {
+			fprintf(stderr, "Warning: accept one argument only," \
+					"more arguments will be ignored\n");
+		}
+		pathname = getfullpathname(buf, sizeof(buf), argv[1]); 
+		instream = fopen(pathname, "r");
+		if (instream == NULL) {
+			fprintf(stderr, "%s: cannot access file %s: %s\n", argv[0], 
+					argv[1], strerror(errno));
+			return 1;
+		}
+	}
 
 	/* init path entry */
 	i = 0;
@@ -46,7 +77,7 @@ int main(int argc, char **argv)
 		fputs("$", stdout);
 
 		/* read commandline */
-		line = fgets(buf, sizeof(buf), stdin);
+		line = fgets(buf, sizeof(buf), instream);
 		if (line == NULL) {
 			break;
 		}
