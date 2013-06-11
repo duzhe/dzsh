@@ -16,9 +16,49 @@ const char *getfullpathname(char *pbuf, size_t bufsize, char *name)
 	return pbuf;
 }
 
+const char *IFS;
+char buf[1024];
+char *params[256];
+
+#define PARSE_STATE_NORMAL 0
+#define PARSE_STATE_QUATA 1
+#define PARSE_STATE_DAUQTA 2
+int parse_commandline()
+{
+	/*
+	int state;
+	char *pline;
+	char *presult[];
+	state = PARSE_STATE_NORMAL;
+	pline = line;
+	presult = result
+	while (true) {
+		switch (*pline) {
+		case '\':
+			break;
+			case 
+		}
+	}
+	*/
+	char *tok;
+	int i;
+	i = 0;
+	tok = strtok(buf, IFS);
+	if (tok == NULL) {
+		return -1;
+	}
+	params[i++] = tok;
+	while (tok != NULL) {
+		tok = strtok(NULL, IFS);
+		params[i++] = tok;
+	};
+	return 0;
+
+}
+
 int main(int argc, char **argv)
 {
-	char buf[1024];
+	char escapebuf[1024];
 	char binbuf[1024];
 	char pathbuf[4096];
 	char *pathentry[32];
@@ -26,11 +66,9 @@ int main(int argc, char **argv)
 	const char *pathname;
 	char *tok;
 	char *bin;
-	char *params[256];
 	int i;
 	int retval;
 	struct stat statbuf;
-	const char *IFS;
 	const char *PS1;
 	const char *PATH;
 	int pid;
@@ -41,6 +79,9 @@ int main(int argc, char **argv)
 		IFS = " \t\n";
 	}
 	PS1 = getenv("PS1");
+	if (PS1 == NULL) {
+		PS1 = "dzsh $";
+	}
 	PATH = getenv("PATH");
 
 	/* parse commandline */
@@ -66,7 +107,7 @@ int main(int argc, char **argv)
 	strncpy(pathbuf, PATH, sizeof(pathbuf));
 	tok = strtok(pathbuf, ":");
 	pathentry[i++] = tok;
-	while (tok != NULL ) {
+	while (tok != NULL) {
 		tok = strtok(NULL, ":");
 		pathentry[i++] = tok;
 	}
@@ -74,26 +115,33 @@ int main(int argc, char **argv)
 	/* man loop */
 	while (1) {
 		/* put PS1 */
-		fputs("$", stdout);
+		fputs(PS1, stdout);
 
 		/* read commandline */
 		line = fgets(buf, sizeof(buf), instream);
 		if (line == NULL) {
+			fputc('\n', stdout);
 			break;
 		}
 
 		/* parse commandline */
-		i = 0;
-		bin = strtok(buf, IFS);
-		if (bin == NULL) {
+		if (parse_commandline(params, buf) == -1) {
 			continue;
 		}
-		tok = bin;
+		bin = params[0];
+		/*
+		i = 0;
+		tok = strtok(buf, IFS);
+		if (tok == NULL) {
+			continue;
+		}
 		params[i++] = tok;
 		while (tok != NULL) {
 			tok = strtok(NULL, IFS);
 			params[i++] = tok;
 		};
+		bin = params[0];
+		*/
 		
 		/* parse bin path */
 		switch(*bin) {
@@ -107,22 +155,22 @@ int main(int argc, char **argv)
 			break;
 		default:
 			for (i=0; i< sizeof(pathentry)/sizeof(*pathentry); ++i) {
-				if (pathentry[i] == NULL ) {
+				if (pathentry[i] == NULL) {
 					break;
 				}
 				strncpy(binbuf, pathentry[i], sizeof(binbuf));
 				strncat(binbuf, "/", sizeof(binbuf));
 				strncat(binbuf, bin, sizeof(binbuf));
 				retval = stat(binbuf, &statbuf);
-				if (retval != 0 ) {
+				if (retval != 0) {
 					continue;
 				}
-				if (statbuf.st_mode & S_IFREG ) {
+				if (statbuf.st_mode & S_IFREG) {
 					bin = binbuf;
 					break;
 				}
 			}
-			if (*bin != '/' ) {
+			if (*bin != '/') {
 				fprintf(stderr, "cannot find %s in PATH ENVIREMENT: %s\n",
 						bin, PATH);
 				continue;
