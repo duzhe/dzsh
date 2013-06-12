@@ -51,14 +51,25 @@ const char *getfullpathname(char *pbuf, size_t bufsize, char *name)
 	return pbuf;
 }
 
+struct process_startup_info {
+	char *params[256];
+	struct list *redirections;
+};
+
+
+struct process_startup_info *create_startup_info(struct mempool *pool)
+{
+	struct process_startup_info *info;
+	info = p_alloc(pool, sizeof(struct process_startup_info));
+	info->redirections = l_create(pool);
+	return info;
+}
+
+
 const char *IFS;
 char buf[1024];
-char *params[256];
-struct list *redirections;
 struct mempool *pool;
-/*
-struct redirection_pair redirections[16];
-*/
+struct list *process_startup_infos;
 const char *program;
 
 
@@ -78,7 +89,12 @@ int parse_commandline()
 	iparams = 0;
 	struct redirection_pair *redirection;
 	struct lnode *node;
-	redirection = NULL;
+	struct process_startup_info *info;
+
+	process_startup_infos = l_create(pool);
+	info = create_startup_info(pool);
+	node = l_pushback(process_startup_infos);
+	node->data = info;
 	p = buf;
 	tok = buf;
 	for (p=buf; *p != '\0'; ++p) {
@@ -87,7 +103,7 @@ int parse_commandline()
 			*p = '\0';
 			redirection = p_alloc(pool, sizeof(struct redirection_pair));
 			redirection->flags = 0;
-			node = l_pushback(redirections);
+			node = l_pushback(info->redirections);
 			node->data = redirection;
 			if (p == tok) {
 				redirection->to.fd = STDIN_FILENO;
@@ -96,7 +112,7 @@ int parse_commandline()
 				redirection->to.fd = atoi(tok);
 			}
 			else {
-				params[iparams++] = tok;
+				info->params[iparams++] = tok;
 				redirection->to.fd = STDIN_FILENO;
 			}
 			tok = p+1;
@@ -106,7 +122,7 @@ int parse_commandline()
 			*p = '\0';
 			redirection = p_alloc(pool, sizeof(struct redirection_pair));
 			redirection->flags = 0;
-			node = l_pushback(redirections);
+			node = l_pushback(info->redirections);
 			node->data = redirection;
 			if (p == tok) {
 				redirection->from.fd = STDOUT_FILENO;
@@ -115,7 +131,7 @@ int parse_commandline()
 				redirection->from.fd = atoi(tok);
 			}
 			else {
-				params[iparams++] = tok;
+				info->params[iparams++] = tok;
 				redirection->from.fd = STDOUT_FILENO;
 			}
 			if (p[1] == '>') {
@@ -136,7 +152,7 @@ int parse_commandline()
 			}
 			switch (state) {
 			case PARSE_STATE_NORMAL:
-				params[iparams++] = tok;
+				info->params[iparams++] = tok;
 				tok = p+1;
 				break;
 			case PARSE_STATE_REDIRECT_TO:
@@ -175,11 +191,11 @@ int parse_commandline()
 			}
 		}
 	}
-	params[iparams] = NULL;
+	info->params[iparams] = NULL;
 	return 0;
 }
 
-int do_redirect()
+int do_redirect(struct process_startup_info *info)
 {
 	struct redirection_pair *p;
 	char buf[1024];
@@ -188,7 +204,7 @@ int do_redirect()
 	int retval;
 	const char *filename;
 	struct lnode *node;
-	for (node = redirections->first; node != NULL; node = node->next) {
+	for (node = info->redirections->first; node != NULL; node = node->next) {
 		p = node->data;
 		if (p->flags & REDIRECT_TO_FILE) {
 			filename = getfullpathname(buf, sizeof(buf), p->to.pathname);
@@ -253,6 +269,7 @@ int main(int argc, char **argv)
 	int pid;
 	int childstatus;
 	FILE *instream;
+	struct process_startup_info *info;
 
 	IFS = getenv("IFS");
 	if (IFS == NULL) {
@@ -300,7 +317,6 @@ int main(int argc, char **argv)
 	while (1) {
 		/* clear pool */
 		p_clear(pool);
-		redirections = l_create(pool);
 
 		/* put PS1 */
 		fputs(PS1, stdout);
@@ -313,10 +329,11 @@ int main(int argc, char **argv)
 		}
 
 		/* parse commandline */
-		if (parse_commandline(params, buf) == -1) {
+		if (parse_commandline() == -1) {
 			continue;
 		}
-		bin = params[0];
+		info = process_startup_infos->first->data;
+		bin = info->params[0];
 		
 		/* parse bin path */
 		if (bin != NULL) switch(*bin) {
@@ -363,11 +380,11 @@ int main(int argc, char **argv)
 			fprintf(stderr, "%s\n", strerror(errno));
 		}
 		if (pid == 0) {
-			if (do_redirect() == -1) {
+			if (do_redirect(info) == -1) {
 				return 1;
 			}
 			if (bin != NULL) {
-				execv(bin, params);
+				execv(bin, info->params);
 			}
 			return 0;
 		}
