@@ -8,6 +8,8 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <ctype.h>
+#include "mempool.h"
+#include "list.h"
 
 
 #define REDIRECT_FROM_FILE (0x01)
@@ -52,7 +54,11 @@ const char *getfullpathname(char *pbuf, size_t bufsize, char *name)
 const char *IFS;
 char buf[1024];
 char *params[256];
+struct list *redirections;
+struct mempool *pool;
+/*
 struct redirection_pair redirections[16];
+*/
 const char *program;
 
 
@@ -67,46 +73,53 @@ int parse_commandline()
 {
 	int state;
 	char *tok, *p;
-	int iparams, iredi;
+	int iparams;
 	state = PARSE_STATE_NORMAL;
 	iparams = 0;
-	iredi = 0;
-	
+	struct redirection_pair *redirection;
+	struct lnode *node;
+	redirection = NULL;
 	p = buf;
 	tok = buf;
 	for (p=buf; *p != '\0'; ++p) {
 		switch (*p) {
 		case '<':
 			*p = '\0';
-			redirections[iredi].flags = 0;
+			redirection = p_alloc(pool, sizeof(struct redirection_pair));
+			redirection->flags = 0;
+			node = l_pushback(redirections);
+			node->data = redirection;
 			if (p == tok) {
-				redirections[iredi].to.fd = STDIN_FILENO;
+				redirection->to.fd = STDIN_FILENO;
 			}
 			else if (isnumeric(tok)) {
-				redirections[iredi].to.fd = atoi(tok);
+				redirection->to.fd = atoi(tok);
 			}
 			else {
 				params[iparams++] = tok;
-				redirections[iredi].to.fd = STDIN_FILENO;
+				redirection->to.fd = STDIN_FILENO;
 			}
 			tok = p+1;
 			state = PARSE_STATE_REDIRECT_FROM;
 			continue;
 		case '>':
 			*p = '\0';
-			redirections[iredi].flags = 0;
+			redirection = p_alloc(pool, sizeof(struct redirection_pair));
+			redirection->flags = 0;
+			node = l_pushback(redirections);
+			node->data = redirection;
 			if (p == tok) {
-				redirections[iredi].from.fd = STDOUT_FILENO;
+				redirection->from.fd = STDOUT_FILENO;
 			}
 			else if (isnumeric(tok)) {
-				redirections[iredi].from.fd = atoi(tok);
+				redirection->from.fd = atoi(tok);
 			}
 			else {
 				params[iparams++] = tok;
-				redirections[iredi].from.fd = STDOUT_FILENO;
+				redirection->from.fd = STDOUT_FILENO;
 			}
 			if (p[1] == '>') {
-				redirections[iredi].flags |= REDIRECT_APPEND;
+				redirection->flags |= REDIRECT_APPEND;
 				p[1] = *IFS;
 			}
 			tok = p+1;
@@ -132,13 +145,12 @@ int parse_commandline()
 						fprintf(stderr, "not a valid file discriptor\n");
 						return -1;
 					}
-					redirections[iredi].to.fd = atoi(tok+1);
+					redirection->to.fd = atoi(tok+1);
 				}
 				else {
-					redirections[iredi].flags |= REDIRECT_TO_FILE;
-					redirections[iredi].to.pathname = tok;
+					redirection->flags |= REDIRECT_TO_FILE;
+					redirection->to.pathname = tok;
 				}
-				++iredi;
 				tok = p+1;
 				state = PARSE_STATE_NORMAL;
 				break;
@@ -148,13 +160,12 @@ int parse_commandline()
 						fprintf(stderr, "not a valid file discriptor\n");
 						return -1;
 					}
-					redirections[iredi].from.fd = atoi(tok+1);
+					redirection->from.fd = atoi(tok+1);
 				}
 				else {
-					redirections[iredi].flags |= REDIRECT_FROM_FILE;
-					redirections[iredi].from.pathname = tok;
+					redirection->flags |= REDIRECT_FROM_FILE;
+					redirection->from.pathname = tok;
 				}
-				++iredi;
 				tok = p+1;
 				state = PARSE_STATE_NORMAL;
 				break;
@@ -165,7 +176,6 @@ int parse_commandline()
 		}
 	}
 	params[iparams] = NULL;
-	redirections[iredi].flags = REDIRECT_SENTINEL;
 	return 0;
 }
 
@@ -177,7 +187,9 @@ int do_redirect()
 	int tofd;
 	int retval;
 	const char *filename;
-	for (p = redirections; p->flags != REDIRECT_SENTINEL; ++p) {
+	struct lnode *node;
+	for (node = redirections->first; node != NULL; node = node->next) {
+		p = node->data;
 		if (p->flags & REDIRECT_TO_FILE) {
 			filename = getfullpathname(buf, sizeof(buf), p->to.pathname);
 			if (p->flags & REDIRECT_APPEND) {
@@ -271,6 +283,9 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* init global var */
+	pool = p_create(8192);
+
 	/* init path entry */
 	i = 0;
 	strncpy(pathbuf, PATH, sizeof(pathbuf));
@@ -283,6 +298,10 @@ int main(int argc, char **argv)
 
 	/* man loop */
 	while (1) {
+		/* clear pool */
+		p_clear(pool);
+		redirections = l_create(pool);
+
 		/* put PS1 */
 		fputs(PS1, stdout);
 
