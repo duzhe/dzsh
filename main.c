@@ -296,7 +296,8 @@ int main(int argc, char **argv)
 	struct stat statbuf;
 	const char *PS1;
 	const char *PATH;
-	int pid;
+	pid_t pid;
+	pid_t *pidpointer;
 	int childstatus;
 	FILE *instream;
 	struct process_startup_info *info;
@@ -304,6 +305,8 @@ int main(int argc, char **argv)
 	int pipefd[2];
 	int fdin;
 	int fdout;
+	struct list *sonpids;
+	struct lnode *pidnode;
 
 	IFS = getenv("IFS");
 	if (IFS == NULL) {
@@ -411,6 +414,7 @@ int main(int argc, char **argv)
 
 		fdin = STDIN_FILENO;
 		fdout = STDOUT_FILENO;
+		sonpids = l_create(pool);
 		while (node != NULL) {
 			/* prepare pipes */
 			/* pipefd[1] is for write , using it as STDOUT at the previous 
@@ -462,6 +466,12 @@ int main(int argc, char **argv)
 				return 0;
 			}
 			else {
+				/* save son process pid */
+				pidpointer = p_alloc(pool, sizeof(pid_t));
+				*pidpointer = pid;
+				pidnode = l_pushback(sonpids);
+				pidnode->data = pidpointer;
+
 				/* if 'fdin' or 'fdout' is pipe, close it */
 				if (fdin != STDIN_FILENO) {
 					close(fdin);
@@ -473,8 +483,12 @@ int main(int argc, char **argv)
 				node = node->next;
 			}
 		}
-		/* after the last fork, wait for last son process */
-		waitpid(pid, &childstatus, 0);
+		/* after the last fork, wait for all son process */
+		for (pidnode = sonpids->first; pidnode != NULL; 
+				pidnode = pidnode->next) {
+			pidpointer = node->data;
+			waitpid(*pidpointer, &childstatus, 0);
+		}
 	}
 	return 0;
 }
