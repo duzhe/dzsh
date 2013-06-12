@@ -15,7 +15,6 @@
 #define REDIRECT_FROM_FILE (0x01)
 #define REDIRECT_TO_FILE (0x02)
 #define REDIRECT_APPEND (0x04)
-#define REDIRECT_SENTINEL (-1)
 typedef struct redirection_pair{
 	int flags;
 	union {
@@ -141,6 +140,24 @@ int parse_commandline()
 			tok = p+1;
 			state = PARSE_STATE_REDIRECT_TO;
 			continue;
+		case '|':
+			switch (state) {
+			case PARSE_STATE_NORMAL:
+				*p = '\0';
+				if (tok != p) {
+					info->params[iparams++] = tok;
+					tok = p+1;
+				}
+				info->params[iparams] = NULL;
+				info = create_startup_info(pool);
+				node = l_pushback(process_startup_infos);
+				node->data = info;
+				iparams = 0;
+				break;
+			default:
+				fprintf(stderr, "%s: invalid syntax", program);
+				return -1;
+			}
 		default:
 			if (strchr(IFS, *p) == NULL) {
 				continue;
@@ -252,6 +269,19 @@ int do_redirect(struct process_startup_info *info)
 	return 0;
 }
 
+void dbgout(struct process_startup_info *info)
+{
+	int pid;
+	int ppid;
+	const char *bin;
+	pid = getpid();
+	ppid = getppid();
+	bin = info->params[0];
+	fprintf(stderr, "process start: pid: %d,  ppid: %d, bin:%s\n",
+			pid, ppid, bin);
+}
+
+
 int main(int argc, char **argv)
 {
 	char binbuf[1024];
@@ -270,6 +300,10 @@ int main(int argc, char **argv)
 	int childstatus;
 	FILE *instream;
 	struct process_startup_info *info;
+	struct lnode *node;
+	int pipefd[2];
+	int fdin;
+	int fdout;
 
 	IFS = getenv("IFS");
 	if (IFS == NULL) {
@@ -332,7 +366,8 @@ int main(int argc, char **argv)
 		if (parse_commandline() == -1) {
 			continue;
 		}
-		info = process_startup_infos->first->data;
+		node = process_startup_infos->first;
+		info = node->data;
 		bin = info->params[0];
 		
 		/* parse bin path */
@@ -374,23 +409,72 @@ int main(int argc, char **argv)
 			break;
 		}
 
-		/* fork and execute */
-		pid = fork();
-		if (pid == -1) {
-			fprintf(stderr, "%s\n", strerror(errno));
-		}
-		if (pid == 0) {
-			if (do_redirect(info) == -1) {
-				return 1;
+		fdin = STDIN_FILENO;
+		fdout = STDOUT_FILENO;
+		while (node != NULL) {
+			/* prepare pipes */
+			/* pipefd[1] is for write , using it as STDOUT at the previous 
+			 * process (on the left side of '|' sign), pipefd[0] is for read, 
+			 * using it as STDIN at the next process (on the right side of '|'
+			 * sign)
+			 * first process, using STDIN as STDIN.
+			 * the last process , using STDOUT as STDOUT.
+			 */
+			info = node->data;
+			if (node->next != NULL) {
+				pipe(pipefd);
+				fdout = pipefd[1];
 			}
-			if (bin != NULL) {
-				execv(bin, info->params);
+			else {
+				fdout = STDOUT_FILENO;
 			}
-			return 0;
+
+			/* fork and execute */
+			pid = fork();
+			if (pid == -1) {
+				fprintf(stderr, "%s\n", strerror(errno));
+			}
+			if (pid == 0) {
+				/*
+				dbgout(info);
+				*/
+				if (fdin != STDIN_FILENO) {
+					/*
+					fprintf(stderr, "pid: %d, dup2: %d ->  %d \n", getpid(), fdin, STDIN_FILENO);
+					*/
+					dup2(fdin, STDIN_FILENO);
+					close(fdin);
+				}
+				if (fdout != STDOUT_FILENO) {
+					/*
+					fprintf(stderr, "pid: %d, dup2: %d ->  %d \n", getpid(), fdout, STDOUT_FILENO);
+					*/
+					dup2(fdout, STDOUT_FILENO);
+					close(fdout);
+				}
+				if (do_redirect(info) == -1) {
+					return 1;
+				}
+				bin = info->params[0];
+				if (bin != NULL) {
+					execvp(bin, info->params);
+				}
+				return 0;
+			}
+			else {
+				/* if 'fdin' or 'fdout' is pipe, close it */
+				if (fdin != STDIN_FILENO) {
+					close(fdin);
+				}
+				if (fdout != STDOUT_FILENO) {
+					close(fdout);
+				}
+				fdin = pipefd[0];
+				node = node->next;
+			}
 		}
-		else {
-			wait(&childstatus);
-		}
+		/* after the last fork, wait for last son process */
+		waitpid(pid, &childstatus, 0);
 	}
 	return 0;
 }
