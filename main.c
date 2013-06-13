@@ -10,32 +10,8 @@
 #include <ctype.h>
 #include "mempool.h"
 #include "list.h"
+#include "cmdline_parser.h"
 
-
-#define REDIRECT_FROM_FILE (0x01)
-#define REDIRECT_TO_FILE (0x02)
-#define REDIRECT_APPEND (0x04)
-typedef struct redirection_pair{
-	int flags;
-	union {
-		int fd;
-		char *pathname;
-	} from;
-	union {
-		int fd;
-		char *pathname;
-	} to;
-}redirection_pair;
-
-int isnumeric(const char *p)
-{
-	while (*p !=0) {
-		if (!isdigit(*p++)) {
-			return 0;
-		}
-	}
-	return 1;
-}
 
 const char *getfullpathname(char *pbuf, size_t bufsize, char *name)
 {
@@ -50,173 +26,9 @@ const char *getfullpathname(char *pbuf, size_t bufsize, char *name)
 	return pbuf;
 }
 
-struct process_startup_info {
-	struct list *params;
-	struct list *redirections;
-};
-
-
-struct process_startup_info *create_startup_info(struct mempool *pool)
-{
-	struct process_startup_info *info;
-	info = p_alloc(pool, sizeof(struct process_startup_info));
-	info->params = l_create(pool);
-	info->redirections = l_create(pool);
-	return info;
-}
-
 
 static const char *program;
 
-
-#define PARSE_STATE_NORMAL 0
-/*
-#define PARSE_STATE_QUATA 1
-#define PARSE_STATE_DAUQTA 2
-*/
-#define PARSE_STATE_REDIRECT_TO 3
-#define PARSE_STATE_REDIRECT_FROM 4
-int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
-		char *buf, const char *IFS, const char **errmsg)
-{
-	int state;
-	char *tok, *p, *msg;
-	state = PARSE_STATE_NORMAL;
-	struct redirection_pair *redirection;
-	struct lnode *node;
-	struct process_startup_info *info;
-
-	info = create_startup_info(pool);
-	node = l_pushback(process_startup_infos, info);
-	p = buf;
-	tok = buf;
-	for (p=buf; *p != '\0'; ++p) {
-		switch (*p) {
-		case '<':
-			switch (state) {
-			case PARSE_STATE_NORMAL:
-				*p = '\0';
-				redirection = p_alloc(pool, sizeof(struct redirection_pair));
-				redirection->flags = 0;
-				node = l_pushback(info->redirections, redirection);
-				if (p == tok) {
-					redirection->to.fd = STDIN_FILENO;
-				}
-				else if (isnumeric(tok)) {
-					redirection->to.fd = atoi(tok);
-				}
-				else {
-					l_pushback(info->params, tok);
-					redirection->to.fd = STDIN_FILENO;
-				}
-				tok = p+1;
-				state = PARSE_STATE_REDIRECT_FROM;
-				break;
-			default:
-				msg = p_alloc(pool, sizeof("invalid syntax"));
-				memcpy(msg, "invalid syntax", sizeof("invalid syntax"));
-				*errmsg = msg;
-				return -1;
-			}
-		case '>':
-			switch (state) {
-			case PARSE_STATE_NORMAL:
-				*p = '\0';
-				redirection = p_alloc(pool, sizeof(struct redirection_pair));
-				redirection->flags = 0;
-				node = l_pushback(info->redirections, redirection);
-				if (p == tok) {
-					redirection->from.fd = STDOUT_FILENO;
-				}
-				else if (isnumeric(tok)) {
-					redirection->from.fd = atoi(tok);
-				}
-				else {
-					l_pushback(info->params, tok);
-					redirection->from.fd = STDOUT_FILENO;
-				}
-				if (p[1] == '>') {
-					redirection->flags |= REDIRECT_APPEND;
-					p[1] = *IFS;
-				}
-				tok = p+1;
-				state = PARSE_STATE_REDIRECT_TO;
-				break;
-			default:
-				msg = p_alloc(pool, sizeof("invalid syntax"));
-				memcpy(msg, "invalid syntax", sizeof("invalid syntax"));
-				*errmsg = msg;
-				return -1;
-			}
-		case '|':
-			switch (state) {
-			case PARSE_STATE_NORMAL:
-				*p = '\0';
-				if (tok != p) {
-					l_pushback(info->params, tok);
-					tok = p+1;
-				}
-				info = create_startup_info(pool);
-				node = l_pushback(process_startup_infos, info);
-				break;
-			default:
-				msg = p_alloc(pool, sizeof("invalid syntax"));
-				memcpy(msg, "invalid syntax", sizeof("invalid syntax"));
-				*errmsg = msg;
-				return -1;
-			}
-		default:
-			if (strchr(IFS, *p) == NULL) {
-				continue;
-			}
-			*p = '\0';
-			if (tok == p) {
-				++tok;
-				continue;
-			}
-			switch (state) {
-			case PARSE_STATE_NORMAL:
-				l_pushback(info->params, tok);
-				tok = p+1;
-				break;
-			case PARSE_STATE_REDIRECT_TO:
-				if (*tok == '&') {
-					if (!isnumeric(tok+1)) {
-						fprintf(stderr, "not a valid file discriptor\n");
-						return -1;
-					}
-					redirection->to.fd = atoi(tok+1);
-				}
-				else {
-					redirection->flags |= REDIRECT_TO_FILE;
-					redirection->to.pathname = tok;
-				}
-				tok = p+1;
-				state = PARSE_STATE_NORMAL;
-				break;
-			case PARSE_STATE_REDIRECT_FROM:
-				if (*tok == '&') {
-					if (!isnumeric(tok+1)) {
-						fprintf(stderr, "not a valid file discriptor\n");
-						return -1;
-					}
-					redirection->from.fd = atoi(tok+1);
-				}
-				else {
-					redirection->flags |= REDIRECT_FROM_FILE;
-					redirection->from.pathname = tok;
-				}
-				tok = p+1;
-				state = PARSE_STATE_NORMAL;
-				break;
-			default:
-				fprintf(stderr, "unexpected position\n");
-				break;
-			}
-		}
-	}
-	return 0;
-}
 
 int do_redirect(struct process_startup_info *info)
 {
@@ -321,6 +133,7 @@ int main(int argc, char **argv)
 	char **params;
 	size_t paramscount;
 	struct lnode *paramsnode;
+	struct cmdline_parser *parser;
 
 	IFS = getenv("IFS");
 	if (IFS == NULL) {
@@ -366,8 +179,10 @@ int main(int argc, char **argv)
 
 	/* man loop */
 	while (1) {
-		/* clear pool */
+		/* clear and reinit */
 		p_clear(pool);
+		process_startup_infos = l_create(pool);
+		parser = create_cmdline_parser(pool,  process_startup_infos, buf, IFS);
 
 		/* put PS1 */
 		fputs(PS1, stdout);
@@ -380,16 +195,16 @@ int main(int argc, char **argv)
 		}
 
 		/* parse commandline */
-		process_startup_infos = l_create(pool);
-		if (parse_commandline(pool, process_startup_infos, buf, IFS, &errmsg)
-				== -1) {
+		if (cmdline_parse(parser, &errmsg) == -1) {
 			fprintf(stderr, "%s: %s\n", program, errmsg);
 			continue;
 		}
 		infonode = process_startup_infos->first;
-		info = infonode->data;
-		if (info->params->first != NULL) {
-			bin = info->params->first->data;
+		if (infonode != NULL) {
+			info = infonode->data;
+			if (info->params->first != NULL) {
+				bin = info->params->first->data;
+			}
 		}
 		else {
 			bin = NULL;
