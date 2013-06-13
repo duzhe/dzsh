@@ -65,10 +65,6 @@ struct process_startup_info *create_startup_info(struct mempool *pool)
 }
 
 
-const char *IFS;
-char buf[1024];
-struct mempool *pool;
-struct list *process_startup_infos;
 const char *program;
 
 
@@ -79,7 +75,8 @@ const char *program;
 */
 #define PARSE_STATE_REDIRECT_TO 3
 #define PARSE_STATE_REDIRECT_FROM 4
-int parse_commandline()
+int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
+		char *buf, const char *IFS)
 {
 	int state;
 	char *tok, *p;
@@ -90,7 +87,6 @@ int parse_commandline()
 	struct lnode *node;
 	struct process_startup_info *info;
 
-	process_startup_infos = l_create(pool);
 	info = create_startup_info(pool);
 	node = l_pushback(process_startup_infos);
 	node->data = info;
@@ -284,6 +280,7 @@ void dbgout(struct process_startup_info *info)
 
 int main(int argc, char **argv)
 {
+	char buf[1024];
 	char binbuf[1024];
 	char pathbuf[4096];
 	char *pathentry[32];
@@ -294,12 +291,14 @@ int main(int argc, char **argv)
 	int i;
 	int retval;
 	struct stat statbuf;
+	const char *IFS;
 	const char *PS1;
 	const char *PATH;
 	pid_t pid;
 	pid_t *pidpointer;
 	int childstatus;
 	FILE *instream;
+	struct list *process_startup_infos;
 	struct process_startup_info *info;
 	struct lnode *node;
 	int pipefd[2];
@@ -307,6 +306,7 @@ int main(int argc, char **argv)
 	int fdout;
 	struct list *sonpids;
 	struct lnode *pidnode;
+	struct mempool *pool;
 
 	IFS = getenv("IFS");
 	if (IFS == NULL) {
@@ -366,7 +366,8 @@ int main(int argc, char **argv)
 		}
 
 		/* parse commandline */
-		if (parse_commandline() == -1) {
+		process_startup_infos = l_create(pool);
+		if (parse_commandline(pool, process_startup_infos, buf, IFS) == -1) {
 			continue;
 		}
 		node = process_startup_infos->first;
