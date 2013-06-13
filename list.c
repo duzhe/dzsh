@@ -43,6 +43,19 @@ struct lnode *l_pushfront(struct list *l, void *data)
 	return node;
 }
 
+
+size_t l_count(struct list *l)
+{
+	size_t count;
+	struct lnode *node;
+	count = 0;
+	node = l->first;
+	for (count=0; node != NULL; node = node->next) {
+		count += 1;
+	}
+	return count;
+}
+
 /*
 struct lnode *l_insert(struct list *, struct lnode*, void *);
 */

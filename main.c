@@ -51,7 +51,7 @@ const char *getfullpathname(char *pbuf, size_t bufsize, char *name)
 }
 
 struct process_startup_info {
-	char *params[256];
+	struct list *params;
 	struct list *redirections;
 };
 
@@ -60,6 +60,7 @@ struct process_startup_info *create_startup_info(struct mempool *pool)
 {
 	struct process_startup_info *info;
 	info = p_alloc(pool, sizeof(struct process_startup_info));
+	info->params = l_create(pool);
 	info->redirections = l_create(pool);
 	return info;
 }
@@ -80,9 +81,7 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 {
 	int state;
 	char *tok, *p, *msg;
-	int iparams;
 	state = PARSE_STATE_NORMAL;
-	iparams = 0;
 	struct redirection_pair *redirection;
 	struct lnode *node;
 	struct process_startup_info *info;
@@ -107,7 +106,7 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 					redirection->to.fd = atoi(tok);
 				}
 				else {
-					info->params[iparams++] = tok;
+					l_pushback(info->params, tok);
 					redirection->to.fd = STDIN_FILENO;
 				}
 				tok = p+1;
@@ -133,7 +132,7 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 					redirection->from.fd = atoi(tok);
 				}
 				else {
-					info->params[iparams++] = tok;
+					l_pushback(info->params, tok);
 					redirection->from.fd = STDOUT_FILENO;
 				}
 				if (p[1] == '>') {
@@ -154,13 +153,11 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 			case PARSE_STATE_NORMAL:
 				*p = '\0';
 				if (tok != p) {
-					info->params[iparams++] = tok;
+					l_pushback(info->params, tok);
 					tok = p+1;
 				}
-				info->params[iparams] = NULL;
 				info = create_startup_info(pool);
 				node = l_pushback(process_startup_infos, info);
-				iparams = 0;
 				break;
 			default:
 				msg = p_alloc(pool, sizeof("invalid syntax"));
@@ -179,7 +176,7 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 			}
 			switch (state) {
 			case PARSE_STATE_NORMAL:
-				info->params[iparams++] = tok;
+				l_pushback(info->params, tok);
 				tok = p+1;
 				break;
 			case PARSE_STATE_REDIRECT_TO:
@@ -218,7 +215,6 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 			}
 		}
 	}
-	info->params[iparams] = NULL;
 	return 0;
 }
 
@@ -286,7 +282,7 @@ void dbgout(struct process_startup_info *info)
 	const char *bin;
 	pid = getpid();
 	ppid = getppid();
-	bin = info->params[0];
+	bin = info->params->first->data;
 	fprintf(stderr, "process start: pid: %d,  ppid: %d, bin:%s\n",
 			pid, ppid, bin);
 }
@@ -315,13 +311,16 @@ int main(int argc, char **argv)
 	FILE *instream;
 	struct list *process_startup_infos;
 	struct process_startup_info *info;
-	struct lnode *node;
+	struct lnode *infonode;
 	int pipefd[2];
 	int fdin;
 	int fdout;
 	struct list *sonpids;
 	struct lnode *pidnode;
 	struct mempool *pool;
+	char **params;
+	size_t paramscount;
+	struct lnode *paramsnode;
 
 	IFS = getenv("IFS");
 	if (IFS == NULL) {
@@ -387,10 +386,15 @@ int main(int argc, char **argv)
 			fprintf(stderr, "%s: %s\n", program, errmsg);
 			continue;
 		}
-		node = process_startup_infos->first;
-		info = node->data;
-		bin = info->params[0];
-		
+		infonode = process_startup_infos->first;
+		info = infonode->data;
+		if (info->params->first != NULL) {
+			bin = info->params->first->data;
+		}
+		else {
+			bin = NULL;
+		}
+
 		/* parse bin path */
 		if (bin != NULL) switch(*bin) {
 		case '/':
@@ -433,7 +437,7 @@ int main(int argc, char **argv)
 		fdin = STDIN_FILENO;
 		fdout = STDOUT_FILENO;
 		sonpids = l_create(pool);
-		while (node != NULL) {
+		while (infonode != NULL) {
 			/* prepare pipes */
 			/* pipefd[1] is for write , using it as STDOUT at the previous 
 			 * process (on the left side of '|' sign), pipefd[0] is for read, 
@@ -442,8 +446,8 @@ int main(int argc, char **argv)
 			 * first process, using STDIN as STDIN.
 			 * the last process , using STDOUT as STDOUT.
 			 */
-			info = node->data;
-			if (node->next != NULL) {
+			info = infonode->data;
+			if (infonode->next != NULL) {
 				pipe(pipefd);
 				fdout = pipefd[1];
 			}
@@ -477,9 +481,15 @@ int main(int argc, char **argv)
 				if (do_redirect(info) == -1) {
 					return 1;
 				}
-				bin = info->params[0];
-				if (bin != NULL) {
-					execvp(bin, info->params);
+				paramscount = l_count(info->params);
+				if (paramscount != 0) {
+					params = p_alloc(pool, sizeof(char*) *(paramscount+1));
+					i = 0;
+					for (paramsnode = info->params->first; paramsnode != NULL;
+							paramsnode = paramsnode->next) {
+						params[i++] = paramsnode->data;
+					}
+					execvp(bin, params);
 				}
 				return 0;
 			}
@@ -497,7 +507,7 @@ int main(int argc, char **argv)
 					close(fdout);
 				}
 				fdin = pipefd[0];
-				node = node->next;
+				infonode = infonode->next;
 			}
 		}
 		/* after the last fork, wait for all son process */
