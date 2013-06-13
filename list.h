@@ -19,8 +19,8 @@ struct list *l_create(struct mempool *);
 /*
 void l_release(struct list *);
 */
-struct lnode *l_pushback(struct list *);
-struct lnode *l_pushfront(struct list *);
+struct lnode *l_pushback(struct list *, void *data);
+struct lnode *l_pushfront(struct list *, void *data);
 /*
 struct lnode *l_insert(struct list *, struct lnode*);
 */

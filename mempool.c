@@ -108,7 +108,6 @@ void *p_large_alloc(struct mempool* pool, size_t size)
 		pool->large = l_create(pool);
 	}
 	p = malloc(size);
-	node = l_pushback(pool->large);
-	node->data = p;
+	node = l_pushback(pool->large, p);
 	return p;
 }

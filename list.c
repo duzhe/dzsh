@@ -13,7 +13,7 @@ struct list *l_create(struct mempool *pool)
 }
 
 
-struct lnode *l_pushback(struct list *l)
+struct lnode *l_pushback(struct list *l, void *data)
 {
 	struct lnode *node;
 	node = p_alloc(l->pool, sizeof(struct lnode));
@@ -25,11 +25,12 @@ struct lnode *l_pushback(struct list *l)
 		l->last->next = node;
 	}
 	l->last = node;
+	node->data = data;
 	return node;
 }
 
 
-struct lnode *l_pushfront(struct list *l)
+struct lnode *l_pushfront(struct list *l, void *data)
 {
 	struct lnode *node;
 	node = p_alloc(l->pool, sizeof(struct lnode));
@@ -38,6 +39,7 @@ struct lnode *l_pushfront(struct list *l)
 	if (l->last == NULL) {
 		l->last = node;
 	}
+	node->data = data;
 	return node;
 }
 

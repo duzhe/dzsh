@@ -88,8 +88,7 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 	struct process_startup_info *info;
 
 	info = create_startup_info(pool);
-	node = l_pushback(process_startup_infos);
-	node->data = info;
+	node = l_pushback(process_startup_infos, info);
 	p = buf;
 	tok = buf;
 	for (p=buf; *p != '\0'; ++p) {
@@ -100,8 +99,7 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 				*p = '\0';
 				redirection = p_alloc(pool, sizeof(struct redirection_pair));
 				redirection->flags = 0;
-				node = l_pushback(info->redirections);
-				node->data = redirection;
+				node = l_pushback(info->redirections, redirection);
 				if (p == tok) {
 					redirection->to.fd = STDIN_FILENO;
 				}
@@ -127,8 +125,7 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 				*p = '\0';
 				redirection = p_alloc(pool, sizeof(struct redirection_pair));
 				redirection->flags = 0;
-				node = l_pushback(info->redirections);
-				node->data = redirection;
+				node = l_pushback(info->redirections, redirection);
 				if (p == tok) {
 					redirection->from.fd = STDOUT_FILENO;
 				}
@@ -162,8 +159,7 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 				}
 				info->params[iparams] = NULL;
 				info = create_startup_info(pool);
-				node = l_pushback(process_startup_infos);
-				node->data = info;
+				node = l_pushback(process_startup_infos, info);
 				iparams = 0;
 				break;
 			default:
@@ -491,8 +487,7 @@ int main(int argc, char **argv)
 				/* save son process pid */
 				pidpointer = p_alloc(pool, sizeof(pid_t));
 				*pidpointer = pid;
-				pidnode = l_pushback(sonpids);
-				pidnode->data = pidpointer;
+				pidnode = l_pushback(sonpids, pidpointer);
 
 				/* if 'fdin' or 'fdout' is pipe, close it */
 				if (fdin != STDIN_FILENO) {
