@@ -65,7 +65,7 @@ struct process_startup_info *create_startup_info(struct mempool *pool)
 }
 
 
-const char *program;
+static const char *program;
 
 
 #define PARSE_STATE_NORMAL 0
@@ -76,10 +76,10 @@ const char *program;
 #define PARSE_STATE_REDIRECT_TO 3
 #define PARSE_STATE_REDIRECT_FROM 4
 int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
-		char *buf, const char *IFS)
+		char *buf, const char *IFS, const char **errmsg)
 {
 	int state;
-	char *tok, *p;
+	char *tok, *p, *msg;
 	int iparams;
 	state = PARSE_STATE_NORMAL;
 	iparams = 0;
@@ -95,47 +95,63 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 	for (p=buf; *p != '\0'; ++p) {
 		switch (*p) {
 		case '<':
-			*p = '\0';
-			redirection = p_alloc(pool, sizeof(struct redirection_pair));
-			redirection->flags = 0;
-			node = l_pushback(info->redirections);
-			node->data = redirection;
-			if (p == tok) {
-				redirection->to.fd = STDIN_FILENO;
+			switch (state) {
+			case PARSE_STATE_NORMAL:
+				*p = '\0';
+				redirection = p_alloc(pool, sizeof(struct redirection_pair));
+				redirection->flags = 0;
+				node = l_pushback(info->redirections);
+				node->data = redirection;
+				if (p == tok) {
+					redirection->to.fd = STDIN_FILENO;
+				}
+				else if (isnumeric(tok)) {
+					redirection->to.fd = atoi(tok);
+				}
+				else {
+					info->params[iparams++] = tok;
+					redirection->to.fd = STDIN_FILENO;
+				}
+				tok = p+1;
+				state = PARSE_STATE_REDIRECT_FROM;
+				break;
+			default:
+				msg = p_alloc(pool, sizeof("invalid syntax"));
+				memcpy(msg, "invalid syntax", sizeof("invalid syntax"));
+				*errmsg = msg;
+				return -1;
 			}
-			else if (isnumeric(tok)) {
-				redirection->to.fd = atoi(tok);
-			}
-			else {
-				info->params[iparams++] = tok;
-				redirection->to.fd = STDIN_FILENO;
-			}
-			tok = p+1;
-			state = PARSE_STATE_REDIRECT_FROM;
-			continue;
 		case '>':
-			*p = '\0';
-			redirection = p_alloc(pool, sizeof(struct redirection_pair));
-			redirection->flags = 0;
-			node = l_pushback(info->redirections);
-			node->data = redirection;
-			if (p == tok) {
-				redirection->from.fd = STDOUT_FILENO;
+			switch (state) {
+			case PARSE_STATE_NORMAL:
+				*p = '\0';
+				redirection = p_alloc(pool, sizeof(struct redirection_pair));
+				redirection->flags = 0;
+				node = l_pushback(info->redirections);
+				node->data = redirection;
+				if (p == tok) {
+					redirection->from.fd = STDOUT_FILENO;
+				}
+				else if (isnumeric(tok)) {
+					redirection->from.fd = atoi(tok);
+				}
+				else {
+					info->params[iparams++] = tok;
+					redirection->from.fd = STDOUT_FILENO;
+				}
+				if (p[1] == '>') {
+					redirection->flags |= REDIRECT_APPEND;
+					p[1] = *IFS;
+				}
+				tok = p+1;
+				state = PARSE_STATE_REDIRECT_TO;
+				break;
+			default:
+				msg = p_alloc(pool, sizeof("invalid syntax"));
+				memcpy(msg, "invalid syntax", sizeof("invalid syntax"));
+				*errmsg = msg;
+				return -1;
 			}
-			else if (isnumeric(tok)) {
-				redirection->from.fd = atoi(tok);
-			}
-			else {
-				info->params[iparams++] = tok;
-				redirection->from.fd = STDOUT_FILENO;
-			}
-			if (p[1] == '>') {
-				redirection->flags |= REDIRECT_APPEND;
-				p[1] = *IFS;
-			}
-			tok = p+1;
-			state = PARSE_STATE_REDIRECT_TO;
-			continue;
 		case '|':
 			switch (state) {
 			case PARSE_STATE_NORMAL:
@@ -151,7 +167,9 @@ int parse_commandline(struct mempool *pool, struct list *process_startup_infos,
 				iparams = 0;
 				break;
 			default:
-				fprintf(stderr, "%s: invalid syntax", program);
+				msg = p_alloc(pool, sizeof("invalid syntax"));
+				memcpy(msg, "invalid syntax", sizeof("invalid syntax"));
+				*errmsg = msg;
 				return -1;
 			}
 		default:
@@ -286,6 +304,7 @@ int main(int argc, char **argv)
 	char *pathentry[32];
 	char *bin;
 	char *line;
+	const char *errmsg;
 	const char *pathname;
 	char *tok;
 	int i;
@@ -367,7 +386,9 @@ int main(int argc, char **argv)
 
 		/* parse commandline */
 		process_startup_infos = l_create(pool);
-		if (parse_commandline(pool, process_startup_infos, buf, IFS) == -1) {
+		if (parse_commandline(pool, process_startup_infos, buf, IFS, &errmsg)
+				== -1) {
+			fprintf(stderr, "%s: %s\n", program, errmsg);
 			continue;
 		}
 		node = process_startup_infos->first;
