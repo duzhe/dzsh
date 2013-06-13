@@ -8,16 +8,16 @@ struct lnode;
 #define REDIRECT_FROM_FILE (0x01)
 #define REDIRECT_TO_FILE (0x02)
 #define REDIRECT_APPEND (0x04)
+
+union redirection_side{
+	int fd;
+	char *pathname;
+};
+
 struct redirection_pair{
 	int flags;
-	union {
-		int fd;
-		char *pathname;
-	} from;
-	union {
-		int fd;
-		char *pathname;
-	} to;
+	union redirection_side from;
+	union redirection_side to;
 };
 
 struct process_startup_info {

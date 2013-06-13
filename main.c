@@ -164,7 +164,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	/* init global var */
+	/* init */
 	pool = p_create(8192);
 
 	/* init path entry */
@@ -304,6 +304,8 @@ int main(int argc, char **argv)
 							paramsnode = paramsnode->next) {
 						params[i++] = paramsnode->data;
 					}
+					params[i] = NULL;
+					bin = params[0];
 					execvp(bin, params);
 				}
 				return 0;

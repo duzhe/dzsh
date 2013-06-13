@@ -102,12 +102,11 @@ void *p_alloc(struct mempool *pool, size_t size)
 
 void *p_large_alloc(struct mempool* pool, size_t size)
 {
-	struct lnode *node;
 	void *p;
 	if (pool->large == NULL) {
 		pool->large = l_create(pool);
 	}
 	p = malloc(size);
-	node = l_pushback(pool->large, p);
+	l_pushback(pool->large, p);
 	return p;
 }
