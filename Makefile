@@ -8,4 +8,4 @@ mempool.o:mempool.c mempool.h list.h
 
 clean:
 	test -f dzsh  && rm -f dzsh
-	ls *.o > /dev/null 2>dev/null && rm -f *.o
+	find . -name '*.o' -exec rm -f {} \;

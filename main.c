@@ -486,7 +486,7 @@ int main(int argc, char **argv)
 		/* after the last fork, wait for all son process */
 		for (pidnode = sonpids->first; pidnode != NULL; 
 				pidnode = pidnode->next) {
-			pidpointer = node->data;
+			pidpointer = pidnode->data;
 			waitpid(*pidpointer, &childstatus, 0);
 		}
 	}
