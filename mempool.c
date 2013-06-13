@@ -16,7 +16,6 @@ struct mempool *p_create(size_t pagesize)
 	page = (struct mempage *)(pbuf + sizeof(struct mempool));
 	pool->pagesize = pagesize;
 	pool->first = page;
-	pool->last = page;
 	pool->now = page;
 	page->buf = pbuf;
 	page->pagesize = pagesize;
@@ -88,8 +87,7 @@ void *p_alloc(struct mempool *pool, size_t size)
 			page->pagesize = pool->pagesize;
 			page->used = sizeof(struct mempool);
 			page->next = NULL;
-			pool->last->next = page;
-			pool->last = page;
+			pool->now->next = page;
 			pool->now = page;
 		}
 		else {

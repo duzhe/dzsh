@@ -15,7 +15,6 @@ struct mempool
 {
 	size_t pagesize;
 	struct mempage *first;
-	struct mempage *last;
 	struct mempage *now;
 	struct list *large;
 	/*
