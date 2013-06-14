@@ -185,7 +185,7 @@ int check_command(const char *bin, struct list *pathentry)
 	case '/':
 		break;
 	case '.':
-		if (getcwd(binbuf, sizeof(binbuf)) == -1) {
+		if (getcwd(binbuf, sizeof(binbuf)) == NULL) {
 			/*
 			fprintf(stderr, "%s: fail to getcwd: %s\n", argv[0],
 					strerror(errno));
@@ -316,6 +316,9 @@ int main(int argc, char **argv)
 			info = infonode->data;
 			if (info->params->first != NULL) {
 				bin = info->params->first->data;
+			}
+			else {
+				bin = NULL;
 			}
 			retval = check_command(bin, env->pathentry);
 			if (retval != 0) {
