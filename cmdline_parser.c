@@ -17,17 +17,6 @@ static int isnumeric(const char *p)
 }
 
 
-static char *p_strdup(struct mempool *pool, const char *str)
-{
-	size_t len;
-	char *new;
-	len = strlen(str);
-	new = p_alloc(pool, len +1);
-	memcpy(new, str, len + 1);
-	return new;
-}
-
-
 #define PARSE_STATE_NORMAL 0
 /*
 #define PARSE_STATE_QUATA 1

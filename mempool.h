@@ -27,6 +27,7 @@ void p_clear(struct mempool *);
 void p_destroy(struct mempool*);
 void *p_alloc(struct mempool *, size_t);
 void *p_large_alloc(struct mempool*, size_t);
+char *p_strdup(struct mempool *, const char *);
 
 
 #endif

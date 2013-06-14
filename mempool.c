@@ -1,6 +1,7 @@
 #include "list.h"
 #include "mempool.h"
 #include <stdlib.h>
+#include <string.h>
 
 
 struct mempool *p_create(size_t pagesize)
@@ -72,6 +73,7 @@ void p_destroy(struct mempool *pool)
 	}
 }
 
+
 void *p_alloc(struct mempool *pool, size_t size)
 {
 	struct mempage *page; 
@@ -100,6 +102,7 @@ void *p_alloc(struct mempool *pool, size_t size)
 	return r;
 }
 
+
 void *p_large_alloc(struct mempool* pool, size_t size)
 {
 	void *p;
@@ -110,3 +113,16 @@ void *p_large_alloc(struct mempool* pool, size_t size)
 	l_pushback(pool->large, p);
 	return p;
 }
+
+
+char *p_strdup(struct mempool *pool, const char *str)
+{
+	size_t len;
+	char *new;
+	len = strlen(str);
+	new = p_alloc(pool, len +1);
+	memcpy(new, str, len + 1);
+	return new;
+}
+
+

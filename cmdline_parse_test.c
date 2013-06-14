@@ -12,16 +12,6 @@
 #include "list.h"
 #include "cmdline_parser.h"
 
-static char *p_strdup(struct mempool *pool, const char *str)
-{
-	size_t len;
-	char *new;
-	len = strlen(str);
-	new = p_alloc(pool, len +1);
-	memcpy(new, str, len + 1);
-	return new;
-}
-
 void print_startup_infos(struct list *infos)
 {
 	struct process_startup_info *info;
