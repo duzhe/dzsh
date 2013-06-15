@@ -226,8 +226,10 @@ int main(int argc, char **argv)
 {
 	struct mempool *static_pool;
 	char buf[1024];
+	char *pbuf;
 	char *bin;
 	char *line;
+	size_t len;
 	const char *errmsg;
 	const char *pathname;
 	int i;
@@ -286,23 +288,50 @@ int main(int argc, char **argv)
 	 * 5. fork and execute
 	 * 6. wait all childs
 	 */
-	while (1) {
+	for (;;) {
 		/* clear and reinit */
 		p_clear(pool);
 		process_startup_infos = l_create(pool);
 		parser = create_cmdline_parser(pool,  process_startup_infos, buf, env->IFS);
 
-		/* put PS1 and read commandline */
+		/* read commandline and parse */
 		fputs(env->PS1, stdout);
-		line = fgets(buf, sizeof(buf), instream);
-		if (line == NULL) {
+		pbuf = buf;
+		retval = CMDLINE_PARSE_EMPTY;
+		for (;;) {
+			line = fgets(pbuf, sizeof(buf) - (pbuf-buf), instream);
+			if (line == NULL) {
+				if (pbuf == buf) {
+					retval = CMDLINE_READING_TERMINATE;
+				}
+				else {
+					retval = CMDLINE_READING_ERROR;
+				}
+				break;
+			}
+			len = strlen(pbuf);
+			pbuf += len;
+
+			retval = cmdline_parse(parser, &errmsg);
+			if (retval == CMDLINE_PARSE_CONTINUE) {
+				continue;
+			}
+			break;
+		}
+		if (retval == CMDLINE_READING_TERMINATE) {
 			fputc('\n', stdout);
 			break;
 		}
-
-		/* parse commandline */
-		if (cmdline_parse(parser, &errmsg) == -1) {
-			fprintf(stderr, "%s: %s\n", env->argv[0], errmsg);
+		if (retval == CMDLINE_READING_ERROR) {
+			fprintf(stderr, "%s: error reading commandline\n", argv[0]);
+			continue;
+		}
+		if (retval == CMDLINE_PARSE_EMPTY) {
+			fputc('\n', stdout);
+			continue;
+		}
+		if (retval != CMDLINE_PARSE_DONE) {
+			fprintf(stderr, "%s: %s\n", argv[0], errmsg);
 			continue;
 		}
 

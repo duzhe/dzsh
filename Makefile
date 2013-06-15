@@ -13,5 +13,5 @@ cmdline_parser.o:cmdline_parser.c cmdline_parser.c mempool.h list.h
 cmdline_parse_test.o:cmdline_parse_test.c cmdline_parser.c mempool.h list.h
 
 clean:
-	test -f dzsh  && rm -f dzsh
+	find . -name dzsh -a -type f -exec  rm -f dzsh \;
 	find . -name '*.o' -exec rm -f {} \;

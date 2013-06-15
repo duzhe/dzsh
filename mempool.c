@@ -126,3 +126,11 @@ char *p_strdup(struct mempool *pool, const char *str)
 }
 
 
+char *p_strndup(struct mempool *pool, const char *str, size_t len)
+{
+	char *new;
+	new = p_alloc(pool, len +1);
+	memcpy(new, str, len);
+	new[len] = '\0';
+	return new;
+}

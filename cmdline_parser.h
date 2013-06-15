@@ -31,6 +31,16 @@ struct cmdline_parser;
 struct cmdline_parser *create_cmdline_parser(struct mempool *pool, 
 		struct list *process_startup_infos, char *cmdlinebuf,
 		const char *IFS);
+
+#define CMDLINE_PARSE_DONE 0x00
+#define CMDLINE_PARSE_OK 0x01
+#define CMDLINE_PARSE_CONTINUE 0x02
+#define CMDLINE_PARSE_SYNTAX_ERROR 0x03
+#define CMDLINE_PARSE_EMPTY 0x04
+#define CMDLINE_READING_TERMINATE 0x05
+#define CMDLINE_READING_ERROR 0x06
+/* OK is an internal state, cmdline_parse will return DONE, CONTINUE
+ * or SYNTAX_ERROR ONLY */
 int cmdline_parse(struct cmdline_parser *parser, const char **errmsg);
 
 

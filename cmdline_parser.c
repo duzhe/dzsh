@@ -18,22 +18,19 @@ static int isnumeric(const char *p)
 
 
 #define PARSE_STATE_NORMAL 0
-/*
 #define PARSE_STATE_QUATA 1
 #define PARSE_STATE_DAUQTA 2
-*/
 
 struct cmdline_parser
 {
 	struct mempool *pool;
 	struct list *process_startup_infos;
-	char *cmdlinebuf;
+	const char *cmdlinebuf;
 	const char *IFS;
 
 	int state;
-	char *p;
-	char *tok;
-	struct redirection_pair *redirection;
+	const char *p;
+	const char *tok;
 	struct process_startup_info *info;
 };
 
@@ -62,7 +59,6 @@ struct cmdline_parser *create_cmdline_parser(struct mempool *pool,
 	parser->state = PARSE_STATE_NORMAL;
 	parser->p = cmdlinebuf;
 	parser->tok = cmdlinebuf;
-	parser->redirection = NULL;
 	parser->info = create_startup_info(pool);
 	l_pushback(process_startup_infos, parser->info);
 	return parser;
@@ -85,7 +81,8 @@ static char *next_token_begin(struct cmdline_parser *parser, char *p)
 */
 
 
-static char *next_token_end(struct cmdline_parser *parser, char *p)
+/*
+static const char *next_token_end(struct cmdline_parser *parser, const char *p)
 {
 	const char *IFS = parser->IFS;
 	while (*p != '\0' && strchr(IFS, *p) != NULL) {
@@ -99,90 +96,118 @@ static char *next_token_end(struct cmdline_parser *parser, char *p)
 	}
 	return p;
 }
+*/
 
+
+static int cmdline_next_tok(struct cmdline_parser *parser, const char *begin, char **tok, const char **pend)
+{
+	struct mempool *pool;
+	const char *IFS;
+	const char *tokend;
+
+	pool = parser->pool;
+	IFS = parser->IFS;
+
+	for (; *begin != '\0' && strchr(IFS, *begin) != NULL; ++begin) {
+	}
+	if (*begin == '\0') {
+		return CMDLINE_PARSE_SYNTAX_ERROR;
+	}
+	for (tokend=begin; *tokend != '\0' && strchr(IFS, *tokend) == NULL; ++tokend) {
+	}
+	if (pend != NULL) {
+		*pend = tokend +1;
+	}
+	*tok= p_strndup(pool, begin, tokend-begin);
+	return CMDLINE_PARSE_OK;
+}
 
 int cmdline_parse_redirection(struct cmdline_parser *parser, const char **pmsg)
 {
 	struct mempool *pool;
 	struct process_startup_info *info;
-	struct redirection_pair *re;
-	const char *IFS;
+	struct redirection_pair re;
+	struct redirection_pair *pre;
 	char sign;
-	int leftfdno;
+	const char *tok, *p;
+	char *tokl, *tokr;
+	int leftdeffd;
 	union redirection_side *left, *right;
+	int retval;
 
 	pool = parser->pool;
 	info = parser->info;
-	re = parser->redirection;
-	if (re == NULL) {
-		re = p_alloc(pool, sizeof(struct redirection_pair));
-		parser->redirection = re;
-		l_pushback(info->redirections, re);
-	}
-	re->flags = 0;
-	IFS = parser->IFS;
+	tok = parser->tok;
+	p = parser->p;
 
-	sign = parser->p[0];
-	parser->p[0] = '\0';
+	re.flags = 0;
+	sign = *p;
+
 	if (sign == '<') {
-		left = &(re->to);
-		right = &(re->from);
-		leftfdno = STDIN_FILENO;
+		left = &(re.to);
+		right = &(re.from);
+		leftdeffd = STDIN_FILENO;
 	}
 	else {
-		left = &(re->from);
-		right = &(re->to);
-		leftfdno = STDOUT_FILENO;
-		if (parser->p[1] == '>') {
-			re->flags |= REDIRECT_APPEND;
-			parser->p[1] = *IFS;
-		}
+		left = &(re.from);
+		right = &(re.to);
+		leftdeffd = STDOUT_FILENO;
 	}
-	if (parser->p == parser->tok) {
-		left->fd = leftfdno;
+	if (p == tok) {
+		left->fd = leftdeffd;
 	}
-	else if (isnumeric(parser->tok)) {
-		left->fd = atoi(parser->tok);
-	}
-	else {
-		l_pushback(info->params, (parser->tok));
-		left->fd = leftfdno;
-	}
-	parser->tok = parser->p + 1;
-	parser->p = next_token_end(parser, parser->p+1);
-	if (parser->p == NULL) {
-		*pmsg = p_strdup(pool, "invalid syntax");
-		return -1;
-	}
-	parser->p[0] = '\0';
-	if (*(parser->tok) == '&') {
-		if (!isnumeric(parser->tok+1)) {
-			*pmsg = p_strdup(pool, "not a valid file discriptor");
-			return -1;
-		}
-		right->fd = atoi(parser->tok+1);
-	}
-	else {
-		right->pathname = parser->tok;
-		if (sign == '<') {
-			re->flags |= REDIRECT_FROM_FILE;
+	else { 
+		tokl = p_strndup(pool, tok, p - tok);
+		if (isnumeric(tokl)) {
+			left->fd = atoi(tokl);
 		}
 		else {
-			re->flags |= REDIRECT_TO_FILE;
+			l_pushback(info->params, tokl);
+			left->fd = leftdeffd;
+			parser->tok = parser->p;
 		}
 	}
-	re = NULL;
-	parser->redirection = NULL;
-	parser->tok = parser->p +1;
-	return 0;
+	if (sign == '>' && p[1] == '>') {
+		re.flags |= REDIRECT_APPEND;
+		p += 1;
+	}
+	tok = p+1;
+	retval = cmdline_next_tok(parser, tok, &tokr, &p);
+	if (retval != CMDLINE_PARSE_OK) {
+		return retval;
+	}
+	if (*tokr == '&') {
+		if (!isnumeric(tokr+1)) {
+			*pmsg = p_strdup(pool, "not a valid file discriptor");
+			return CMDLINE_PARSE_SYNTAX_ERROR;
+		}
+		right->fd = atoi(tokr+1);
+	}
+	else {
+		right->pathname = tokr;
+		if (sign == '<') {
+			re.flags |= REDIRECT_FROM_FILE;
+		}
+		else {
+			re.flags |= REDIRECT_TO_FILE;
+		}
+	}
+	pre = p_alloc(pool, sizeof(struct redirection_pair));
+	memcpy(pre, &re, sizeof(struct redirection_pair));
+	l_pushback(info->redirections, pre);
+	parser->p = p+1;
+	parser->tok = p+1;
+	return CMDLINE_PARSE_OK;
 }
 
 
 int cmdline_parse(struct cmdline_parser *parser, const char **pmsg)
 {
+	int result;
 	struct mempool *pool;
 	struct list *process_startup_infos;
 	const char *IFS;
+	const char *tok, *p;
 	/*
 	int state;
 	*/
@@ -192,39 +217,47 @@ int cmdline_parse(struct cmdline_parser *parser, const char **pmsg)
 	process_startup_infos = parser->process_startup_infos;
 	IFS = parser->IFS;
 	info = parser->info;
+	tok = parser->tok;
+	p = parser->p;
 	/*
 	state = parser->state;
 	*/
-	for (;parser->p[0] != '\0'; parser->p += 1) {
-		switch (parser->p[0]) {
+	for (;*p != '\0'; ++p) {
+		switch (*p) {
 		case '<':
 		case '>':
-			if (cmdline_parse_redirection(parser, pmsg) != 0) {
-				return -1;
+			parser->p = p;
+			parser->tok = tok;
+			result = cmdline_parse_redirection(parser, pmsg);
+			p = parser->p;
+			tok = parser->tok;
+			if (result != CMDLINE_PARSE_OK) {
+				return result;
 			}
 			break;
 		case '|':
-			parser->p[0] = '\0';
-			if (parser->tok != parser->p) {
-				l_pushback(info->params, parser->tok);
+			if (tok != p) {
+				tok = p_strndup(pool, tok, p-tok);
+				l_pushback(info->params, (void*)tok);
 			}
 			parser->info = info = create_startup_info(pool);
 			l_pushback(process_startup_infos, info);
-			parser->tok = parser->p + 1;
+			parser->tok = tok = p + 1;
 			break;
 		default:
-			if (strchr(IFS, parser->p[0]) == NULL) {
+			if (strchr(IFS, *p) == NULL) {
 				continue;
 			}
-			parser->p[0] = '\0';
-			if (parser->tok == parser->p) {
-				parser->tok += 1;
+			if (tok == p) {
+				parser->tok = tok = p + 1;
 				continue;
 			}
-			l_pushback(info->params, parser->tok);
-			parser->tok = parser->p + 1;
+			tok = p_strndup(pool, tok, p - tok);
+			l_pushback(info->params, (void*)tok);
+			parser->tok = tok = p + 1;
 			break;
 		}
 	}
-	return 0;
+	parser->p = p;
+	return CMDLINE_PARSE_DONE;
 }
