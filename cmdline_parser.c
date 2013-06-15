@@ -1,11 +1,13 @@
-#include "cmdline_parser.h"
-#include "mempool.h"
-#include "list.h"
 #include <unistd.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
+#include "cmdline_parser.h"
+#include "mempool.h"
+#include "list.h"
+#include "str.h"
 
+/*
 static int isnumeric(const char *p)
 {
 	while (*p !=0) {
@@ -15,6 +17,7 @@ static int isnumeric(const char *p)
 	}
 	return 1;
 }
+*/
 
 
 #define PARSE_STATE_NORMAL 0
@@ -99,7 +102,8 @@ static const char *next_token_end(struct cmdline_parser *parser, const char *p)
 */
 
 
-static int cmdline_next_tok(struct cmdline_parser *parser, const char *begin, char **tok, const char **pend)
+static int cmdline_next_tok(struct cmdline_parser *parser, const char *begin, 
+		struct cstr **tok, const char **pend)
 {
 	struct mempool *pool;
 	const char *IFS;
@@ -118,7 +122,7 @@ static int cmdline_next_tok(struct cmdline_parser *parser, const char *begin, ch
 	if (pend != NULL) {
 		*pend = tokend +1;
 	}
-	*tok= p_strndup(pool, begin, tokend-begin);
+	*tok= make_cstr(pool, begin, tokend-begin);
 	return CMDLINE_PARSE_OK;
 }
 
@@ -130,9 +134,9 @@ int cmdline_parse_redirection(struct cmdline_parser *parser, const char **pmsg)
 	struct redirection_pair *pre;
 	char sign;
 	const char *tok, *p;
-	char *tokl, *tokr;
 	int leftdeffd;
 	union redirection_side *left, *right;
+	struct cstr *str;
 	int retval;
 
 	pool = parser->pool;
@@ -157,12 +161,12 @@ int cmdline_parse_redirection(struct cmdline_parser *parser, const char **pmsg)
 		left->fd = leftdeffd;
 	}
 	else { 
-		tokl = p_strndup(pool, tok, p - tok);
-		if (isnumeric(tokl)) {
-			left->fd = atoi(tokl);
+		str = make_cstr(pool, tok, p - tok);
+		if (cstr_isnumeric(str)) {
+			left->fd = cstr_atoi(str);
 		}
 		else {
-			l_pushback(info->params, tokl);
+			l_pushback(info->params, str);
 			left->fd = leftdeffd;
 			parser->tok = parser->p;
 		}
@@ -172,19 +176,21 @@ int cmdline_parse_redirection(struct cmdline_parser *parser, const char **pmsg)
 		p += 1;
 	}
 	tok = p+1;
-	retval = cmdline_next_tok(parser, tok, &tokr, &p);
+	retval = cmdline_next_tok(parser, tok, &str, &p);
 	if (retval != CMDLINE_PARSE_OK) {
 		return retval;
 	}
-	if (*tokr == '&') {
-		if (!isnumeric(tokr+1)) {
+	if (*(str->data) == '&') {
+		str->data += 1;
+		str->len -= 1;
+		if (!cstr_isnumeric(str)) {
 			*pmsg = p_strdup(pool, "not a valid file discriptor");
 			return CMDLINE_PARSE_SYNTAX_ERROR;
 		}
-		right->fd = atoi(tokr+1);
+		right->fd = cstr_atoi(str);
 	}
 	else {
-		right->pathname = tokr;
+		right->pathname = str;
 		if (sign == '<') {
 			re.flags |= REDIRECT_FROM_FILE;
 		}
@@ -195,8 +201,8 @@ int cmdline_parse_redirection(struct cmdline_parser *parser, const char **pmsg)
 	pre = p_alloc(pool, sizeof(struct redirection_pair));
 	memcpy(pre, &re, sizeof(struct redirection_pair));
 	l_pushback(info->redirections, pre);
-	parser->p = p+1;
-	parser->tok = p+1;
+	parser->p = p;
+	parser->tok = p;
 	return CMDLINE_PARSE_OK;
 }
 
@@ -208,6 +214,7 @@ int cmdline_parse(struct cmdline_parser *parser, const char **pmsg)
 	struct list *process_startup_infos;
 	const char *IFS;
 	const char *tok, *p;
+	struct cstr *str;
 	/*
 	int state;
 	*/
@@ -237,8 +244,8 @@ int cmdline_parse(struct cmdline_parser *parser, const char **pmsg)
 			break;
 		case '|':
 			if (tok != p) {
-				tok = p_strndup(pool, tok, p-tok);
-				l_pushback(info->params, (void*)tok);
+				str = make_cstr(pool, tok, p-tok);
+				l_pushback(info->params, str);
 			}
 			parser->info = info = create_startup_info(pool);
 			l_pushback(process_startup_infos, info);
@@ -252,8 +259,8 @@ int cmdline_parse(struct cmdline_parser *parser, const char **pmsg)
 				parser->tok = tok = p + 1;
 				continue;
 			}
-			tok = p_strndup(pool, tok, p - tok);
-			l_pushback(info->params, (void*)tok);
+			str = make_cstr(pool, tok, p - tok);
+			l_pushback(info->params,  str);
 			parser->tok = tok = p + 1;
 			break;
 		}

@@ -4,6 +4,7 @@
 struct mempool;
 struct list;
 struct lnode;
+struct cstr;
 
 #define REDIRECT_FROM_FILE (0x01)
 #define REDIRECT_TO_FILE (0x02)
@@ -11,7 +12,7 @@ struct lnode;
 
 union redirection_side{
 	int fd;
-	char *pathname;
+	struct cstr *pathname;
 };
 
 struct redirection_pair{

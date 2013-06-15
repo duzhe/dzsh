@@ -39,6 +39,7 @@ void p_clear(struct mempool *pool)
 			large = large->next;
 		}
 	}
+	pool->large = NULL;
 
 	page = pool->first;
 	page->used = sizeof(struct mempool) + sizeof(struct mempage);

@@ -8,32 +8,35 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <ctype.h>
+#include <limits.h>
 #include "mempool.h"
 #include "list.h"
+#include "str.h"
 #include "cmdline_parser.h"
 
 
 struct env {
 	struct mempool *pool;
 	int argc;
-	const char **argv;
+	char **argv;
 	const char *IFS;
 	const char *PS1;
 	const char *PATH;
 	struct list *pathentry;
-	/*
-	const char *cwd;
-	*/
+	long maxpath;
+	struct cstr *cwd;
 }*env;
 
 
-int initialize_env(struct mempool *pool)
+int initialize_env(struct mempool *pool, int argc, char **argv)
 {
 	struct list *pathentry;
 	char *ppathbuf;
 	char *tok;
 	env = p_alloc(pool, sizeof(struct env));
 	env->pool = pool;
+	env->argc = argc;
+	env->argv = argv;
 
 	env->IFS = getenv("IFS");
 	if (env->IFS == NULL) {
@@ -51,41 +54,62 @@ int initialize_env(struct mempool *pool)
 	pathentry = l_create(pool);
 	tok = strtok(ppathbuf, ":");
 	while (tok != NULL) {
-		l_pushback(pathentry, tok);
+		l_pushback(pathentry, make_cstr(pool, tok, strlen(tok)));
 		tok = strtok(NULL, ":");
 	}
 	env->pathentry = pathentry;
+
+#ifdef _PC_PATH_MAX
+	env->maxpath = pathconf("/", _PC_PATH_MAX);
+	if (env->maxpath == -1) {
+		env->maxpath = 4096;
+	}
+#else
+	env->maxpath = 4096;
+#endif
+	env->cwd = new_cstr(pool);
+	env->cwd->data = p_large_alloc(pool, env->maxpath);
+	if (getcwd((char*)env->cwd->data, env->maxpath) == NULL) {
+		fprintf(stderr, "%s: cannot get current working directory: %s", 
+				env->argv[0], strerror(errno));
+		return -1;
+	}
 	return 0;
 }
 
 
-const char *getfullpathname(char *pbuf, size_t bufsize, char *name)
+const char *getfullpathname(struct mempool *pool, struct cstr *name)
 {
-	if (*name == '/') {
-		return name;
+	struct cstr *cwd;
+	char *pathname;
+	int len;
+	if (*(name->data) == '/') {
+		return p_cstrdup(pool, name);
 	}
-	if (getcwd(pbuf, bufsize) == NULL) {
-		return NULL;
-	}
-	strncat(pbuf, "/", bufsize);
-	strncat(pbuf, name, bufsize);
-	return pbuf;
+	cwd = env->cwd;
+	len = cwd->len + 1 + name->len;
+	pathname = p_alloc(pool, len+1);
+	memcpy(pathname, cwd->data, cwd->len);
+	pathname[cwd->len] = '/';
+	memcpy(pathname+ cwd->len +1, name->data, name->len);
+	return pathname;
 }
 
 
 int do_redirect(struct list *redirections)
 {
+	struct mempool *pool;
 	struct redirection_pair *p;
-	char buf[1024];
 	int fromfd;
 	int tofd;
 	int retval;
 	const char *filename;
 	struct lnode *node;
+	pool = p_create(8196);
 	for (node = redirections->first; node != NULL; node = node->next) {
 		p = node->data;
 		if (p->flags & REDIRECT_TO_FILE) {
-			filename = getfullpathname(buf, sizeof(buf), p->to.pathname);
+			filename = getfullpathname(pool, p->to.pathname);
 			if (p->flags & REDIRECT_APPEND) {
 				tofd = open(filename, O_APPEND|O_WRONLY);
 			}
@@ -94,8 +118,9 @@ int do_redirect(struct list *redirections)
 						S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
 			}
 			if (tofd == -1) {
-				fprintf(stderr, "%s: cannot open file %s for write: %s\n", env->argv[0], 
-						p->to.pathname, strerror(errno));
+				fprintf(stderr, "%s: cannot open file ", env->argv[0]);
+				cstr_print(p->to.pathname, stderr);
+				fprintf(stderr, " for write: %s\n", strerror(errno));
 				return -1;
 			}
 		}
@@ -103,11 +128,12 @@ int do_redirect(struct list *redirections)
 			tofd = p->to.fd;
 		}
 		if (p->flags & REDIRECT_FROM_FILE) {
-			filename = getfullpathname(buf, sizeof(buf), p->from.pathname);
+			filename = getfullpathname(pool, p->from.pathname);
 			fromfd = open(filename, O_RDONLY);
 			if (fromfd == -1) {
-				fprintf(stderr, "%s: cannot open file %s for read: %s\n", env->argv[0], 
-						p->from.pathname, strerror(errno));
+				fprintf(stderr, "%s: cannot open file ", env->argv[0]);
+				cstr_print(p->from.pathname, stderr);
+				fprintf(stderr, " for read: %s\n", strerror(errno));
 				return -1;
 			}
 		}
@@ -130,17 +156,20 @@ int do_redirect(struct list *redirections)
 	return 0;
 }
 
+
+/*
 void dbgout(struct process_startup_info *info)
 {
 	int pid;
 	int ppid;
-	const char *bin;
+	struct cstr *bin;
 	pid = getpid();
 	ppid = getppid();
 	bin = info->params->first->data;
 	fprintf(stderr, "process start: pid: %d,  ppid: %d, bin:%s\n",
 			pid, ppid, bin);
 }
+*/
 
 
 int start_subprocess(char **params, struct list *redirections, int fdin, int fdout)
@@ -172,50 +201,54 @@ int start_subprocess(char **params, struct list *redirections, int fdin, int fdo
 }
 
 
-int check_command(const char *bin, struct list *pathentry)
+int check_command(struct mempool *pool, struct cstr *bin, struct list *pathentry)
 {
-	char binbuf[1024];
 	struct lnode *node;
-	int retval;
+	size_t len;
+	char *pathname;
+	struct cstr *binpath;
 	struct stat statbuf;
-	if (bin == NULL) {
+	int retval;
+	if (cstr_empty(bin)) {
 		return 0;
 	}
-	switch(*bin) {
+	switch(*(bin->data)) {
 	case '/':
+		pathname = (char*)bin->data;
+		len = bin->len;
 		break;
 	case '.':
-		if (getcwd(binbuf, sizeof(binbuf)) == NULL) {
-			/*
-			fprintf(stderr, "%s: fail to getcwd: %s\n", argv[0],
-					strerror(errno));
-			*/
-			return -1;;
-		}
-		strncat(binbuf, "/", sizeof(binbuf));
-		strncat(binbuf, bin, sizeof(binbuf));
-		bin = binbuf;
+		len = env->cwd->len + 1 + bin->len;
+		pathname = p_alloc(pool, len +1);
+		memcpy(pathname, env->cwd->data, env->cwd->len);
+		pathname[env->cwd->len] = '/';
+		memcpy(pathname + env->cwd->len +1, bin->data, bin->len);
+		pathname[len] = '\0';
 		break;
 	default:
+		pathname = p_large_alloc(pool, env->maxpath);
 		for (node=pathentry->first; node!=NULL; node=node->next) {
-			if (node->data == NULL) {
-				break;
+			binpath = node->data;
+			len = binpath->len + 1 + bin->len;
+			memcpy(pathname, binpath->data, binpath->len);
+			pathname[binpath->len] = '/';
+			memcpy(pathname + env->cwd->len +1, bin->data, bin->len);
+			pathname[len] = '\0';
+			retval = stat(pathname, &statbuf);
+			if (retval != 0) {
+				continue;
 			}
-			strncpy(binbuf, node->data, sizeof(binbuf));
-			strncat(binbuf, "/", sizeof(binbuf));
-			strncat(binbuf, bin, sizeof(binbuf));
-			retval = stat(binbuf, &statbuf);
+			retval = stat(pathname, &statbuf);
 			if (retval != 0) {
 				continue;
 			}
 			if (statbuf.st_mode & S_IFREG) {
-				bin = binbuf;
 				break;
 			}
 		}
 		break;
 	}
-	if (*bin != '/') {
+	if (*pathname != '/') {
 		return -1;
 	}
 	return 0;
@@ -227,7 +260,7 @@ int main(int argc, char **argv)
 	struct mempool *static_pool;
 	char buf[1024];
 	char *pbuf;
-	char *bin;
+	struct cstr *bin;
 	char *line;
 	size_t len;
 	const char *errmsg;
@@ -253,6 +286,12 @@ int main(int argc, char **argv)
 	struct lnode *paramsnode;
 	struct cmdline_parser *parser;
 
+	/* global initialize */
+	static_pool = p_create(8196);
+	if (initialize_env(static_pool, argc, argv) != 0) {
+		return -1;
+	}
+
 	/* parse dzsh commandline */
 	if (argc == 1) {
 		instream = stdin;
@@ -262,19 +301,13 @@ int main(int argc, char **argv)
 			fprintf(stderr, "Warning: accept one argument only," \
 					"more arguments will be ignored\n");
 		}
-		pathname = getfullpathname(buf, sizeof(buf), argv[1]); 
+		pathname = getfullpathname(static_pool, dup_cstr(static_pool, argv[1])); 
 		instream = fopen(pathname, "r");
 		if (instream == NULL) {
 			fprintf(stderr, "%s: cannot access file %s: %s\n", argv[0], 
 					argv[1], strerror(errno));
 			return 1;
 		}
-	}
-
-	/* global initialize */
-	static_pool = p_create(8196);
-	if (initialize_env(static_pool) != 0) {
-		return -1;
 	}
 
 	/* init */
@@ -349,10 +382,12 @@ int main(int argc, char **argv)
 			else {
 				bin = NULL;
 			}
-			retval = check_command(bin, env->pathentry);
+			retval = check_command(pool, bin, env->pathentry);
 			if (retval != 0) {
+				/*
 				fprintf(stderr, "cannot find %s in PATH ENVIREMENT: %s\n",
 						bin, env->PATH);
+						*/
 				all_ok = 0;
 				break;
 			}
@@ -395,7 +430,7 @@ int main(int argc, char **argv)
 				i = 0;
 				for (paramsnode = info->params->first; paramsnode != NULL;
 						paramsnode = paramsnode->next) {
-					params[i++] = paramsnode->data;
+					params[i++] = p_cstrdup(pool, paramsnode->data);
 				}
 				params[i] = NULL;
 			}

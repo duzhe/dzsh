@@ -10,13 +10,14 @@
 #include <ctype.h>
 #include "mempool.h"
 #include "list.h"
+#include "str.h"
 #include "cmdline_parser.h"
 
 void print_startup_infos(struct list *infos)
 {
 	struct process_startup_info *info;
 	struct lnode *infonode;
-	const char *param;
+	struct cstr *param;
 	struct lnode *paramnode;
 	struct redirection_pair *re;
 	struct lnode *renode;
@@ -25,7 +26,8 @@ void print_startup_infos(struct list *infos)
 		info = infonode->data;
 		for (paramnode = info->params->first; paramnode != NULL; paramnode = paramnode->next) {
 			param = paramnode->data;
-			printf("%s ", param);
+			cstr_print(param, stdout);
+			fputc(' ', stdout);
 		}
 		for (renode = info->redirections->first; renode != NULL; renode = renode->next) {
 			re = renode->data;
@@ -34,13 +36,18 @@ void print_startup_infos(struct list *infos)
 					printf("fd%d->fd%d ", re->from.fd, re->to.fd);
 					break;
 				case 1:
-					printf("%s->fd%d ", re->from.pathname, re->to.fd);
+					cstr_print(re->from.pathname, stdout);
+					printf("->fd%d ", re->to.fd);
 					break;
 				case 2:
-					printf("fd%d->%s ", re->from.fd, re->to.pathname);
+					printf("fd%d->", re->from.fd);
+					cstr_print(re->to.pathname, stdout);
+					fputc(' ', stdout);
 					break;
 				case 6:
-					printf("fd%d->>%s ", re->from.fd, re->to.pathname);
+					printf("fd%d->>", re->from.fd);
+					cstr_print(re->to.pathname, stdout);
+					fputc(' ', stdout);
 					break;
 			}
 		}
