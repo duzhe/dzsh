@@ -1,5 +1,5 @@
 CFLAGS=-g -Wall
-dzsh: main.o list.o mempool.o cmdline_parser.o str.o
+dzsh: main.o list.o mempool.o cmdline_parser.o str.o ctags
 	gcc -g -Wall main.o list.o mempool.o cmdline_parser.o str.o -o dzsh
 test: cmdline_parse_test
 	./cmdline_parse_test

@@ -36,12 +36,16 @@ void print_startup_infos(struct list *infos)
 					printf("fd%d->fd%d ", re->from.fd, re->to.fd);
 					break;
 				case 1:
-					cstr_print(re->from.pathname, stdout);
-					printf("->fd%d ", re->to.fd);
+					printf("fd%d<-fd%d ", re->to.fd, re->from.fd);
 					break;
 				case 2:
 					printf("fd%d->", re->from.fd);
 					cstr_print(re->to.pathname, stdout);
+					fputc(' ', stdout);
+					break;
+				case 3:
+					printf("fd%d<-", re->to.fd);
+					cstr_print(re->from.pathname, stdout);
 					fputc(' ', stdout);
 					break;
 				case 6:
@@ -60,11 +64,12 @@ void print_startup_infos(struct list *infos)
 
 int main(int argc, char **argv)
 {
-	const char *errmsg;
 	const char *IFS;
 	char *line;
 	struct mempool *pool;
+	struct list *cmdlist;
 	struct list *process_startup_infos;
+	struct lnode *node;
 	struct cmdline_parser *parser;
 	int i;
 	char *testcases[] = {
@@ -76,7 +81,9 @@ int main(int argc, char **argv)
 		"ls -la >> /tmp/aaa 2>&1\n",
 		"ls -l 2> /dev/null | sort -k1 \n",
 		"echo -n hello > /tmp/ttt 2>&1\n",
-		"cat /tmp/ttt | sort -k2 -nr | uniq -c > /tmp/sorted\n"};
+		"cat /tmp/ttt | sort -k2 -nr | uniq -c > /tmp/sorted\n",
+		"cat /tmp/ttt | sort -k2 -nr ; ls > /tmp/ttt\n",
+	};
 
 
 
@@ -85,20 +92,24 @@ int main(int argc, char **argv)
 
 	for (i=0; i< sizeof(testcases)/sizeof(*testcases); ++i) {
 		p_clear(pool);
-		process_startup_infos = l_create(pool);
+		cmdlist = l_create(pool);
 		line = p_strdup(pool, testcases[i]);
-		parser = create_cmdline_parser(pool,  process_startup_infos, line, IFS);
+		parser = create_cmdline_parser(pool,  cmdlist, line, IFS);
 
 		printf("orig cmdline:\n\t%s", testcases[i]);
 		/* parse commandline */
-		if (cmdline_parse(parser, &errmsg) == -1) {
-			fprintf(stderr, "%s: %s\n", argv[0], errmsg);
+		if (cmdline_parse(parser) != CMDLINE_PARSE_DONE) {
+			fprintf(stderr, "%s: %s\n", argv[0], errmsg(parser));
 			/*
 			continue;
 			*/
 		}
-		printf("parse result:\n\t");
-		print_startup_infos(process_startup_infos);
+		printf("parse result:\n");
+		for (node = cmdlist->first; node != NULL; node = node->next) {
+			process_startup_infos = node->data;
+			printf("\t");
+			print_startup_infos(process_startup_infos);
+		}
 		printf("\n");
 	}
 	return 0;

@@ -135,3 +135,12 @@ char *p_strndup(struct mempool *pool, const char *str, size_t len)
 	new[len] = '\0';
 	return new;
 }
+
+
+void *p_dup(struct mempool *pool, void *obj, size_t size)
+{
+	void *new;
+	new = p_alloc(pool, size);
+	memcpy(new, obj, size);
+	return new;
+}

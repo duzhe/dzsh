@@ -1,6 +1,7 @@
 #ifndef _MEMPOOL_H_INCLUDE
 #define _MEMPOOL_H_INCLUDE
 #include <stddef.h>
+#include "bool.h"
 
 struct list;
 struct mempage
@@ -29,6 +30,7 @@ void *p_alloc(struct mempool *, size_t);
 void *p_large_alloc(struct mempool*, size_t);
 char *p_strdup(struct mempool *, const char *);
 char *p_strndup(struct mempool *, const char *, size_t);
+void *p_dup(struct mempool *, void *, size_t);
 
 
 #endif

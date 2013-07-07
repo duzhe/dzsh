@@ -99,46 +99,51 @@ const char *getfullpathname(struct mempool *pool, struct cstr *name)
 int do_redirect(struct list *redirections)
 {
 	struct mempool *pool;
-	struct redirection_pair *p;
+	struct redirection *p;
 	int fromfd;
 	int tofd;
 	int retval;
 	const char *filename;
 	struct lnode *node;
+	int rightfd;
+	const char *openfor;
 	pool = p_create(8196);
 	for (node = redirections->first; node != NULL; node = node->next) {
 		p = node->data;
-		if (p->flags & REDIRECT_TO_FILE) {
-			filename = getfullpathname(pool, p->to.pathname);
-			if (p->flags & REDIRECT_APPEND) {
-				tofd = open(filename, O_APPEND|O_WRONLY);
+		if (p->flags & REDIRECT_FILE) {
+			filename = getfullpathname(pool, p->right.pathname);
+			if (p->flags & REDIRECT_IN) {
+				rightfd = open(filename,  O_RDONLY);
+				openfor = "read";
 			}
 			else {
-				tofd = open(filename, O_CREAT|O_TRUNC|O_WRONLY, 
-						S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+				if (p->flags & REDIRECT_APPEND) {
+					rightfd = open(filename, O_APPEND|O_WRONLY);
+				}
+				else {
+					rightfd = open(filename, O_CREAT|O_TRUNC|O_WRONLY,
+							S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+				}
+				openfor = "write";
 			}
-			if (tofd == -1) {
+			if (rightfd == -1) {
 				fprintf(stderr, "%s: cannot open file ", env->argv[0]);
-				cstr_print(p->to.pathname, stderr);
-				fprintf(stderr, " for write: %s\n", strerror(errno));
+				cstr_print(p->right.pathname, stderr);
+				fprintf(stderr, " for %s: %s\n", openfor, strerror(errno));
 				return -1;
 			}
 		}
 		else {
-			tofd = p->to.fd;
+			rightfd = p->right.fd;
 		}
-		if (p->flags & REDIRECT_FROM_FILE) {
-			filename = getfullpathname(pool, p->from.pathname);
-			fromfd = open(filename, O_RDONLY);
-			if (fromfd == -1) {
-				fprintf(stderr, "%s: cannot open file ", env->argv[0]);
-				cstr_print(p->from.pathname, stderr);
-				fprintf(stderr, " for read: %s\n", strerror(errno));
-				return -1;
-			}
+
+		if (p->flags & REDIRECT_IN) {
+			fromfd = rightfd;
+			tofd = p->leftfd;
 		}
 		else {
-			fromfd = p->from.fd;
+			fromfd = p->leftfd;
+			tofd = rightfd;
 		}
 		retval = dup2(tofd, fromfd);
 		if (retval == -1) {
@@ -146,11 +151,8 @@ int do_redirect(struct list *redirections)
 					strerror(errno));
 			return -1;
 		}
-		if (p->flags & REDIRECT_TO_FILE && tofd != fromfd) {
-			close(tofd);
-		}
-		if (p->flags & REDIRECT_FROM_FILE && tofd != fromfd) {
-			close(fromfd);
+		if (p->flags & REDIRECT_FILE) {
+			close(rightfd);
 		}
 	}
 	return 0;
@@ -172,11 +174,8 @@ void dbgout(struct process_startup_info *info)
 */
 
 
-int start_subprocess(char **params, struct list *redirections, int fdin, int fdout)
+static int subprocess_exec(const char *bin, char **params, struct list *redirections, int fdin, int fdout)
 {
-	/*
-	dbgout(info);
-	*/
 	if (fdin != STDIN_FILENO) {
 		/*
 		fprintf(stderr, "pid: %d, dup2: %d ->  %d \n", getpid(), fdin, STDIN_FILENO);
@@ -194,14 +193,14 @@ int start_subprocess(char **params, struct list *redirections, int fdin, int fdo
 	if (do_redirect(redirections) == -1) {
 		return -1;
 	}
-	if (params[0] != NULL) {
-		execvp(params[0], params);
+	if (bin != NULL) {
+		execv(bin, params);
 	}
 	return 0;
 }
 
 
-int check_command(struct mempool *pool, struct cstr *bin, struct list *pathentry)
+static const char *getbinpathname(struct mempool *pool, struct cstr *bin, struct list *pathentry)
 {
 	struct lnode *node;
 	size_t len;
@@ -210,7 +209,7 @@ int check_command(struct mempool *pool, struct cstr *bin, struct list *pathentry
 	struct stat statbuf;
 	int retval;
 	if (cstr_empty(bin)) {
-		return 0;
+		return NULL;
 	}
 	switch(*(bin->data)) {
 	case '/':
@@ -232,24 +231,142 @@ int check_command(struct mempool *pool, struct cstr *bin, struct list *pathentry
 			len = binpath->len + 1 + bin->len;
 			memcpy(pathname, binpath->data, binpath->len);
 			pathname[binpath->len] = '/';
-			memcpy(pathname + env->cwd->len +1, bin->data, bin->len);
+			memcpy(pathname + binpath->len +1, bin->data, bin->len);
 			pathname[len] = '\0';
 			retval = stat(pathname, &statbuf);
-			if (retval != 0) {
-				continue;
+			if (retval == 0 && statbuf.st_mode & S_IFREG) {
+				return pathname;
 			}
-			retval = stat(pathname, &statbuf);
-			if (retval != 0) {
-				continue;
-			}
-			if (statbuf.st_mode & S_IFREG) {
-				break;
-			}
+			*pathname = '0';
 		}
 		break;
 	}
 	if (*pathname != '/') {
-		return -1;
+		return NULL;
+	}
+	/* test exists */
+	retval = stat(pathname, &statbuf);
+	if (retval != 0 || !(statbuf.st_mode & S_IFREG)) {
+		return NULL;
+	}
+	return pathname;
+}
+
+
+static BOOL check(struct mempool *pool, struct list *infos) 
+{
+	struct lnode *infonode;
+	struct process_startup_info *info;
+	struct cstr *bin;
+	const char *binfullpath;
+	BOOL all_ok;
+	/* check commandline */
+	all_ok = TRUE;
+	for (infonode = infos->first; infonode!=NULL; infonode=infonode->next) {
+		if (infonode == NULL) {
+			continue;
+		}
+		info = infonode->data;
+		if (info->params->first != NULL) {
+			bin = info->params->first->data;
+			binfullpath = getbinpathname(pool, bin, env->pathentry);
+			if (binfullpath == NULL) {
+				all_ok = FALSE;
+				break;
+			}
+		}
+		else {
+			binfullpath = NULL;
+		}
+		info->bin = binfullpath;
+	}
+	return all_ok;
+}
+
+
+int execute(struct mempool *pool, struct list *process_startup_infos)
+{
+	int fdin, fdout;
+	struct list *sonpids;
+	struct lnode *infonode;
+	struct lnode *paramsnode;
+	struct lnode *pidnode;
+	struct process_startup_info *info;
+	int pipefd[2];
+	int paramscount;
+	char **params;
+	int i;
+	int childstatus;
+	pid_t pid;
+	pid_t *pidpointer;
+
+	fdin = STDIN_FILENO;
+	fdout = STDOUT_FILENO;
+	sonpids = l_create(pool);
+	/* each iteration produce a subprocess */
+	/* 1. prepare startup info and pipefds 
+	 * 2. fork  child process exec into specified command
+	 *          parent save child pid and go to next iteration
+	 * */
+	for (infonode = process_startup_infos->first; infonode != NULL; 
+			infonode = infonode->next) {
+		/* prepare pipes */
+		/* pipefd[1] is for write , using it as STDOUT at the previous 
+		 * process (on the left side of '|' sign), pipefd[0] is for read, 
+		 * using it as STDIN at the next process (on the right side of '|'
+		 * sign)
+		 * first process, using STDIN as STDIN.
+		 * the last process , using STDOUT as STDOUT.
+		 */
+		info = infonode->data;
+		if (infonode->next != NULL) {
+			pipe(pipefd);
+			fdout = pipefd[1];
+		}
+		else {
+			fdout = STDOUT_FILENO;
+		}
+
+		/* get an array form 'params' */
+		paramscount = l_count(info->params);
+		if (paramscount != 0) {
+			params = p_alloc(pool, sizeof(char*) *(paramscount+1));
+			i = 0;
+			for (paramsnode = info->params->first; paramsnode != NULL;
+					paramsnode = paramsnode->next) {
+				params[i++] = p_cstrdup(pool, paramsnode->data);
+			}
+			params[i] = NULL;
+		}
+
+		/* fork and execute */
+		pid = fork();
+		if (pid == -1) {
+			fprintf(stderr, "%s\n", strerror(errno));
+			break;
+		}
+		if (pid == 0) {
+			return subprocess_exec(info->bin, params, info->redirections, fdin, fdout);
+		}
+		/* save son process pid */
+		pidpointer = p_alloc(pool, sizeof(pid_t));
+		*pidpointer = pid;
+		pidnode = l_pushback(sonpids, pidpointer);
+
+		/* if 'fdin' or 'fdout' is pipe, close it */
+		if (fdin != STDIN_FILENO) {
+			close(fdin);
+		}
+		if (fdout != STDOUT_FILENO) {
+			close(fdout);
+		}
+		fdin = pipefd[0];
+	}
+	/* after the last fork, wait for all son process */
+	for (pidnode = sonpids->first; pidnode != NULL; 
+			pidnode = pidnode->next) {
+		pidpointer = pidnode->data;
+		waitpid(*pidpointer, &childstatus, 0);
 	}
 	return 0;
 }
@@ -260,31 +377,16 @@ int main(int argc, char **argv)
 	struct mempool *static_pool;
 	char buf[1024];
 	char *pbuf;
-	struct cstr *bin;
 	char *line;
 	size_t len;
-	const char *errmsg;
 	const char *pathname;
-	int i;
-	int all_ok;
 	int retval;
-	pid_t pid;
-	pid_t *pidpointer;
-	int childstatus;
 	FILE *instream;
+	struct list *cmdlist;
 	struct list *process_startup_infos;
-	struct process_startup_info *info;
-	struct lnode *infonode;
-	int pipefd[2];
-	int fdin;
-	int fdout;
 	struct mempool *pool;
-	struct list *sonpids;
-	struct lnode *pidnode;
-	char **params;
-	size_t paramscount;
-	struct lnode *paramsnode;
 	struct cmdline_parser *parser;
+	struct lnode *node;
 
 	/* global initialize */
 	static_pool = p_create(8196);
@@ -324,8 +426,12 @@ int main(int argc, char **argv)
 	for (;;) {
 		/* clear and reinit */
 		p_clear(pool);
+		/*
 		process_startup_infos = l_create(pool);
 		parser = create_cmdline_parser(pool,  process_startup_infos, buf, env->IFS);
+		*/
+		cmdlist = l_create(pool);
+		parser = create_cmdline_parser(pool,  cmdlist, buf, env->IFS);
 
 		/* read commandline and parse */
 		fputs(env->PS1, stdout);
@@ -345,7 +451,7 @@ int main(int argc, char **argv)
 			len = strlen(pbuf);
 			pbuf += len;
 
-			retval = cmdline_parse(parser, &errmsg);
+			retval = cmdline_parse(parser);
 			if (retval == CMDLINE_PARSE_CONTINUE) {
 				continue;
 			}
@@ -364,105 +470,16 @@ int main(int argc, char **argv)
 			continue;
 		}
 		if (retval != CMDLINE_PARSE_DONE) {
-			fprintf(stderr, "%s: %s\n", argv[0], errmsg);
+			fprintf(stderr, "%s: %s\n", argv[0], errmsg(parser));
 			continue;
 		}
 
-		/* check commandline */
-		all_ok = 1;
-		for (infonode = process_startup_infos->first; infonode!=NULL;
-				infonode=infonode->next) {
-			if (infonode == NULL) {
+		for (node = cmdlist->first; node != NULL; node = node->next) {
+			process_startup_infos = node->data;
+			if (!check(pool, process_startup_infos)){
 				continue;
 			}
-			info = infonode->data;
-			if (info->params->first != NULL) {
-				bin = info->params->first->data;
-			}
-			else {
-				bin = NULL;
-			}
-			retval = check_command(pool, bin, env->pathentry);
-			if (retval != 0) {
-				/*
-				fprintf(stderr, "cannot find %s in PATH ENVIREMENT: %s\n",
-						bin, env->PATH);
-						*/
-				all_ok = 0;
-				break;
-			}
-		}
-		if (!all_ok) {
-			continue;
-		}
-
-		fdin = STDIN_FILENO;
-		fdout = STDOUT_FILENO;
-		sonpids = l_create(pool);
-		/* each iteration produce a subprocess */
-		/* 1. prepare startup info and pipefds 
-		 * 2. fork  child process exec into specified command
-		 *          parent save child pid and go to next iteration
-		 * */
-		for (infonode = process_startup_infos->first; infonode != NULL; 
-				infonode = infonode->next) {
-			/* prepare pipes */
-			/* pipefd[1] is for write , using it as STDOUT at the previous 
-			 * process (on the left side of '|' sign), pipefd[0] is for read, 
-			 * using it as STDIN at the next process (on the right side of '|'
-			 * sign)
-			 * first process, using STDIN as STDIN.
-			 * the last process , using STDOUT as STDOUT.
-			 */
-			info = infonode->data;
-			if (infonode->next != NULL) {
-				pipe(pipefd);
-				fdout = pipefd[1];
-			}
-			else {
-				fdout = STDOUT_FILENO;
-			}
-
-			/* get an array form 'params' */
-			paramscount = l_count(info->params);
-			if (paramscount != 0) {
-				params = p_alloc(pool, sizeof(char*) *(paramscount+1));
-				i = 0;
-				for (paramsnode = info->params->first; paramsnode != NULL;
-						paramsnode = paramsnode->next) {
-					params[i++] = p_cstrdup(pool, paramsnode->data);
-				}
-				params[i] = NULL;
-			}
-
-			/* fork and execute */
-			pid = fork();
-			if (pid == -1) {
-				fprintf(stderr, "%s\n", strerror(errno));
-				break;
-			}
-			if (pid == 0) {
-				return start_subprocess(params, info->redirections, fdin, fdout);
-			}
-			/* save son process pid */
-			pidpointer = p_alloc(pool, sizeof(pid_t));
-			*pidpointer = pid;
-			pidnode = l_pushback(sonpids, pidpointer);
-
-			/* if 'fdin' or 'fdout' is pipe, close it */
-			if (fdin != STDIN_FILENO) {
-				close(fdin);
-			}
-			if (fdout != STDOUT_FILENO) {
-				close(fdout);
-			}
-			fdin = pipefd[0];
-		}
-		/* after the last fork, wait for all son process */
-		for (pidnode = sonpids->first; pidnode != NULL; 
-				pidnode = pidnode->next) {
-			pidpointer = pidnode->data;
-			waitpid(*pidpointer, &childstatus, 0);
+			execute(pool, process_startup_infos);
 		}
 	}
 	p_destroy(static_pool);

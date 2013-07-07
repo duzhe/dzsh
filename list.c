@@ -56,6 +56,12 @@ size_t l_count(struct list *l)
 	return count;
 }
 
+
+BOOL l_empty(struct list *l)
+{
+	return l->first == NULL;
+}
+
 /*
 struct lnode *l_insert(struct list *, struct lnode*, void *);
 */
