@@ -71,15 +71,19 @@ struct cmdline_parser
 typedef int (*cmdline_parse_phase_func)(struct cmdline_parser *);
 static int cmdline_parse_token(struct cmdline_parser *parser);
 static int cmdline_parse_classication(struct cmdline_parser *parser);
+#ifdef DEBUG
 static int cmdline_parse_expand(struct cmdline_parser *parser);
 static int cmdline_parse_token_print(struct cmdline_parser *parser);
 static int cmdline_parse_end(struct cmdline_parser *parser);
+#endif
 
 static cmdline_parse_phase_func phase_func[] = {
 	&cmdline_parse_token,
+#ifdef DEBUG
+	&cmdline_parse_token_print,
+#endif
 	&cmdline_parse_classication,
 	/*
-	&cmdline_parse_token_print,
 	&cmdline_parse_end,
 	&cmdline_parse_expand,
 	*/
@@ -99,14 +103,20 @@ static cmdline_parse_phase_func phase_func[] = {
 #define TOKEN_TYPE_JOB					0x09
 #define TOKEN_TYPE_FUNCNAME				0x0a
 #define TOKEN_TYPE_FUNCBODY				0x0b
+/*
 #define TOKEN_TYPE_SQUOTE				0x0c
 #define TOKEN_TYPE_DQUOTE				0x0d
+*/
 #define TOKEN_TYPE_BACKTICK				0x0e
 
 #define TOKEN_FLAGS_VARIABLE			0x01
 #define TOKEN_FLAGS_SPECIALVAR			0x02
 #define TOKEN_FLAGS_WILDCARD			0x04
 #define TOKEN_FLAGS_INLINE_SUBPROCESS	0x08
+#define TOKEN_FLAGS_DQUOTED				0x0F
+#define TOKEN_FLAGS_SQUOTED				0x10
+#define TOKEN_FLAGS_BACKSLASH			0x20
+
 struct token {
 	unsigned int type:16;
 	unsigned int flags:16;
@@ -273,6 +283,7 @@ int cmdline_parse_redirection(struct cmdline_parser *parser, struct cstr *token,
 	
 	pool = parser->pool;
 	IFS = parser->IFS;
+	re->flags = 0;
 	for (p = token->data; *p != '<' && *p != '>'; ++p);
 	if (*p == '<') {
 		leftdeffd = STDIN_FILENO;
@@ -302,12 +313,14 @@ int cmdline_parse_redirection(struct cmdline_parser *parser, struct cstr *token,
 		re->right.fd = cstr_atoi(&t);
 	}
 	else {
+		/*
 		p = get_token_begin(p, IFS);
 		if (p == NULL || *p == '\n') {
 			parser->errmsg = "unexpected newline";
 			return CMDLINE_PARSE_SYNTAX_ERROR;
 		}
 		re->right.pathname = make_cstr(pool, p, token->data + token->len - p);
+		*/
 		re->flags |= REDIRECT_FILE;
 	}
 	return CMDLINE_PARSE_OK;
@@ -463,10 +476,12 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 			++p;
 			switch (*tokbegin) {
 			case '\'':
-				tokentype = TOKEN_TYPE_SQUOTE;
+				tokentype = TOKEN_TYPE_NORMAL;
+				tokenflags |= TOKEN_FLAGS_SQUOTED;
 				break;
 			case '"':
-				tokentype = TOKEN_TYPE_DQUOTE;
+				tokentype = TOKEN_TYPE_NORMAL;
+				tokenflags |= TOKEN_FLAGS_DQUOTED;
 				break;
 			case '`':
 				tokentype = TOKEN_TYPE_BACKTICK;
@@ -484,6 +499,7 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 						retval = CMDLINE_PARSE_CONTINUE;
 						goto RETURN;
 					}
+					tokenflags |= TOKEN_FLAGS_BACKSLASH;
 				}
 				else if (*p == '(' && *(p+1) == ')') {
 					ptok = p_alloc(pool, sizeof(struct token));
@@ -545,6 +561,7 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 				p = get_token_end(p+2, IFS);
 			}
 			else {
+				/*
 				p = get_token_begin(p+1, IFS);
 				if (*p == '\n') {
 					parser->errmsg = "unexpected newline";
@@ -552,6 +569,8 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 					goto RETURN;
 				}
 				p = get_token_end(p, IFS);
+				*/
+				p += 1;
 			}
 			if (*p == '\0') {
 				retval = CMDLINE_PARSE_CONTINUE;
@@ -593,6 +612,7 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 	struct process_startup_info *info;
 	struct redirection *re;
 	int retval;
+	int redirect_file;
 	
 	pool = parser->pool;
 	cmdlist = parser->cmdlist;
@@ -601,17 +621,44 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 	}
 	infos = l_create(pool);
 	info = create_startup_info(pool);
+	redirect_file =0;
 	for (node = parser->toklist->first; node != NULL; node = node->next) {
 		token = node->data;
+		if (redirect_file) {
+			switch(token->type) {
+			case TOKEN_TYPE_NORMAL:
+				if (token->flags & (TOKEN_FLAGS_DQUOTED | TOKEN_FLAGS_SQUOTED)) {
+					re->right.pathname =  make_cstr(pool, token->tok.data+1, 
+							token->tok.len-2);
+				}
+				else {
+					re->right.pathname = &(token->tok);
+				}
+			default:
+				parser->errmsg = "invalid syntax";
+				return CMDLINE_PARSE_SYNTAX_ERROR;
+			}
+			redirect_file = 0;
+			continue;
+		}
 		switch (token->type) {
 		case TOKEN_TYPE_NORMAL:
-			l_pushback(info->params, &(token->tok));
+			if (token->flags & (TOKEN_FLAGS_DQUOTED | TOKEN_FLAGS_SQUOTED)) {
+				l_pushback(info->params, make_cstr(pool, token->tok.data+1,
+							token->tok.len-2));
+			}
+			else {
+				l_pushback(info->params, &(token->tok));
+			}
 			break;
 		case TOKEN_TYPE_REDIRECT:
 			re = p_alloc(pool, sizeof(struct redirection));
 			retval = cmdline_parse_redirection(parser, &(token->tok), re);
 			if (retval != CMDLINE_PARSE_OK) {
 				return retval;
+			}
+			if (re->flags & REDIRECT_FILE) {
+				redirect_file = 1;
 			}
 			l_pushback(info->redirections, re);
 			break;
@@ -649,6 +696,7 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 }
 
 
+#ifdef DEBUG
 static int cmdline_parse_expand(struct cmdline_parser *parser)
 {
 	return PARSE_STATE_DONE;
@@ -664,7 +712,7 @@ static int cmdline_parse_token_print(struct cmdline_parser *parser)
 	fprintf(stderr, "got %d tokens:\n", count);
 	for (i=0,node = parser->toklist->first; i< count; ++i,node = node->next) {
 		tok = node->data;
-		printf("  %d : ", i);
+		printf(" %d %d %d: ", i, tok->type, tok->flags);
 		cstr_print(&tok->tok, stdout);
 		printf("\n");
 	}
@@ -678,6 +726,7 @@ static int cmdline_parse_end(struct cmdline_parser *parser)
 	parser->errmsg = "parse end;";
 	return CMDLINE_PARSE_SYNTAX_ERROR;
 }
+#endif
 
 
 const char *errmsg(struct cmdline_parser *parser)

@@ -19,7 +19,7 @@ void print_startup_infos(struct list *infos)
 	struct lnode *infonode;
 	struct cstr *param;
 	struct lnode *paramnode;
-	struct redirection_pair *re;
+	struct redirection *re;
 	struct lnode *renode;
 	
 	for (infonode = infos->first; infonode != NULL; infonode = infonode->next) {
@@ -33,25 +33,28 @@ void print_startup_infos(struct list *infos)
 			re = renode->data;
 			switch (re->flags) {
 				case 0:
-					printf("fd%d->fd%d ", re->from.fd, re->to.fd);
+					printf("fd%d->fd%d ", re->leftfd, re->right.fd);
 					break;
 				case 1:
-					printf("fd%d<-fd%d ", re->to.fd, re->from.fd);
+					printf("fd%d<-fd%d ", re->right.fd, re->leftfd);
 					break;
 				case 2:
-					printf("fd%d->", re->from.fd);
-					cstr_print(re->to.pathname, stdout);
+					printf("fd%d->", re->leftfd);
+					cstr_print(re->right.pathname, stdout);
 					fputc(' ', stdout);
 					break;
 				case 3:
-					printf("fd%d<-", re->to.fd);
-					cstr_print(re->from.pathname, stdout);
+					printf("fd%d<-", re->leftfd);
+					cstr_print(re->right.pathname, stdout);
 					fputc(' ', stdout);
 					break;
 				case 6:
-					printf("fd%d->>", re->from.fd);
-					cstr_print(re->to.pathname, stdout);
+					printf("fd%d->>", re->leftfd);
+					cstr_print(re->right.pathname, stdout);
 					fputc(' ', stdout);
+					break;
+				default:
+					printf("unexpected flags %d\n", re->flags);
 					break;
 			}
 		}
@@ -75,6 +78,7 @@ int main(int argc, char **argv)
 	char *testcases[] = {
 		"ls\n",
 		"ls -l\n",
+		"ls 'a c'\n",
 		"ls -a > /tmp/aaa\n",
 		"ls -l -a >> /tmp/aaa\n",
 		"sort < /tmp/aaa > /tmp/bbb\n",

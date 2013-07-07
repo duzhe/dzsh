@@ -1,6 +1,16 @@
-CFLAGS=-g -Wall
-dzsh: main.o list.o mempool.o cmdline_parser.o str.o ctags
+ver = release
+
+ifeq ($(ver), debug)
+CFLAGS=-g -Wall -DDEBUG
+else
+CFLAGS=-g -Wall -O2
+endif
+
+dzsh: clean main.o list.o mempool.o cmdline_parser.o str.o ctags
 	gcc -g -Wall main.o list.o mempool.o cmdline_parser.o str.o -o dzsh
+debug: 
+	make clean 
+	CFLAGS="-g -Wall -D DEBUG" make dzsh
 test: cmdline_parse_test
 	./cmdline_parse_test
 cmdline_parse_test:cmdline_parse_test.o list.o mempool.o cmdline_parser.o str.o

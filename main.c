@@ -176,6 +176,7 @@ void dbgout(struct process_startup_info *info)
 
 static int subprocess_exec(const char *bin, char **params, struct list *redirections, int fdin, int fdout)
 {
+	int retval;
 	if (fdin != STDIN_FILENO) {
 		/*
 		fprintf(stderr, "pid: %d, dup2: %d ->  %d \n", getpid(), fdin, STDIN_FILENO);
@@ -194,9 +195,12 @@ static int subprocess_exec(const char *bin, char **params, struct list *redirect
 		return -1;
 	}
 	if (bin != NULL) {
-		execv(bin, params);
+		retval = execv(bin, params);
+		if (retval == -1) {
+			return 1;
+		}
 	}
-	return 0;
+	return 0; 
 }
 
 
@@ -299,6 +303,7 @@ int execute(struct mempool *pool, struct list *process_startup_infos)
 	int childstatus;
 	pid_t pid;
 	pid_t *pidpointer;
+	int retval;
 
 	fdin = STDIN_FILENO;
 	fdout = STDOUT_FILENO;
@@ -320,7 +325,11 @@ int execute(struct mempool *pool, struct list *process_startup_infos)
 		 */
 		info = infonode->data;
 		if (infonode->next != NULL) {
-			pipe(pipefd);
+			retval = pipe(pipefd);
+			if (retval == -1) {
+				fprintf(stderr, "%s: fail create pipe: %s\n", env->argv[0], 
+						strerror(errno));
+			}
 			fdout = pipefd[1];
 		}
 		else {
@@ -346,7 +355,8 @@ int execute(struct mempool *pool, struct list *process_startup_infos)
 			break;
 		}
 		if (pid == 0) {
-			return subprocess_exec(info->bin, params, info->redirections, fdin, fdout);
+			retval = subprocess_exec(info->bin, params, info->redirections, fdin, fdout);
+			exit(retval);
 		}
 		/* save son process pid */
 		pidpointer = p_alloc(pool, sizeof(pid_t));
