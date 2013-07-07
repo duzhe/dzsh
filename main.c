@@ -21,6 +21,7 @@ struct env {
 	char **argv;
 	const char *IFS;
 	const char *PS1;
+	const char *PS2;
 	const char *PATH;
 	struct list *pathentry;
 	long maxpath;
@@ -46,6 +47,11 @@ int initialize_env(struct mempool *pool, int argc, char **argv)
 	env->PS1 = getenv("PS1");
 	if (env->PS1 == NULL) {
 		env->PS1 = "dzsh $";
+	}
+	
+	env->PS2 = getenv("PS2");
+	if (env->PS2 == NULL) {
+		env->PS2 = "> ";
 	}
 
 	env->PATH = getenv("PATH");
@@ -463,6 +469,7 @@ int main(int argc, char **argv)
 
 			retval = cmdline_parse(parser);
 			if (retval == CMDLINE_PARSE_CONTINUE) {
+				fputs(env->PS2, stdout);
 				continue;
 			}
 			break;
