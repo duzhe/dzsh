@@ -32,20 +32,20 @@ static struct tokenmap map_token_begin[256];
 #define PARSE_STATE_BEGIN		0x02
 #define PARSE_STATE_NORMAL 		0x03
 #define PARSE_STATE_DONE		0x04
-#define PARSE_STATE_QUATA 		0x05
-/*
-#define PARSE_STATE_DQUATA 		0x06
+#define PARSE_STATE_SQUOTE 		0x05
+#define PARSE_STATE_DQUOTE 		0x06
 #define PARSE_STATE_FUNCTION 	0x07
 #define PARSE_STATE_BACKTICK 	0x08
-*/
+/*
 #define PARSE_STATE_ENCLOSE		0x06
-#define PARSE_STATE_FUNCBODY	0x07
+*/
 #define PARSE_STATE_BACKSLASH 	0x09
 #define PARSE_STATE_REDIRECT	0x10
 #define PARSE_STATE_ASSIGMENT	0x11
 #define PARSE_STATE_TEST		0x12
 #define PARSE_STATE_COMMENT		0x13
 #define PARSE_STATE_JOB			0x14
+#define PARSE_STATE_FUNCBODY	0x15
 
 #define PARSE_PHASE_TOKEN	0x00
 #define PARSE_PHASE_ESCAPE  0x01
@@ -386,21 +386,19 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 				retval =  CMDLINE_PARSE_OK;
 				goto RETURN;
 			}
-			switch(*tokbegin) {
-			case '\'':
-			case '"':
-			case '`':
-			case '[':
-				state = PARSE_STATE_ENCLOSE;
-				p = tokbegin +1;
-				continue;
+			p = tokbegin;
+			switch(*p) {
+			case '\'': state = PARSE_STATE_SQUOTE;++p;break;
+			case '"':  state = PARSE_STATE_DQUOTE;++p;break;
+			case '`':  state = PARSE_STATE_BACKTICK;++p;break;
+			case '[':  state = PARSE_STATE_TEST;++p;break;
 			case '|':
 				tokentype = TOKEN_TYPE_PIPE;
 				p = tokbegin+1;
 				state = PARSE_STATE_DONE;
 				break;
 			case '&':
-				if (tokbegin[1] == '&') {
+				if (p[1] == '&') {
 					tokentype = TOKEN_TYPE_DAND;
 					p = tokbegin +2;
 				}
@@ -462,33 +460,26 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 			tokentype = TOKEN_TYPE_COMMENT;
 			state = PARSE_STATE_DONE;
 			break;
-		case PARSE_STATE_ENCLOSE:
-			if (*tokbegin == '[') {
-				p = get_enclose(p, ']');
-			}
-			else {
-				p = get_enclose(p, *tokbegin);
-			}
-			if (*p == '\0') {
-				retval = CMDLINE_PARSE_CONTINUE;
-				goto RETURN;
-			}
-			++p;
-			switch (*tokbegin) {
-			case '\'':
-				tokentype = TOKEN_TYPE_NORMAL;
-				tokenflags |= TOKEN_FLAGS_SQUOTED;
-				break;
-			case '"':
-				tokentype = TOKEN_TYPE_NORMAL;
-				tokenflags |= TOKEN_FLAGS_DQUOTED;
-				break;
-			case '`':
-				tokentype = TOKEN_TYPE_BACKTICK;
-				break;
-			case '[':
-				tokentype = TOKEN_TYPE_TEST;
-			}
+		case PARSE_STATE_SQUOTE:
+			p = get_enclose(p, '\'');
+			tokentype = TOKEN_TYPE_NORMAL;
+			tokenflags |= TOKEN_FLAGS_SQUOTED;
+			state = PARSE_STATE_DONE;
+			break;
+		case PARSE_STATE_DQUOTE:
+			p = get_enclose(p, '"');
+			tokentype = TOKEN_TYPE_NORMAL;
+			tokenflags |= TOKEN_FLAGS_DQUOTED;
+			state = PARSE_STATE_DONE;
+			break;
+		case PARSE_STATE_BACKTICK:
+			p = get_enclose(p, '`');
+			tokentype = TOKEN_TYPE_BACKTICK;
+			state = PARSE_STATE_DONE;
+			break;
+		case PARSE_STATE_TEST:
+			p = get_enclose(p, ']');
+			tokentype = TOKEN_TYPE_TEST;
 			state = PARSE_STATE_DONE;
 			break;
 		case PARSE_STATE_NORMAL:
