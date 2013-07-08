@@ -76,8 +76,10 @@ int main(int argc, char **argv)
 	struct cmdline_parser *parser;
 	int i;
 	char *testcases[] = {
+		/*
 		"ls\n",
 		"ls -l\n",
+		*/
 		"ls 'a c'\n",
 		"ls -a > /tmp/aaa\n",
 		"ls -l -a >> /tmp/aaa\n",

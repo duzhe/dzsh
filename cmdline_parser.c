@@ -31,7 +31,9 @@ static struct tokenmap map_token_begin[256];
 
 #define PARSE_STATE_BEGIN		0x02
 #define PARSE_STATE_NORMAL 		0x03
+/*
 #define PARSE_STATE_DONE		0x04
+*/
 #define PARSE_STATE_SQUOTE 		0x05
 #define PARSE_STATE_DQUOTE 		0x06
 #define PARSE_STATE_FUNCTION 	0x07
@@ -275,14 +277,10 @@ const char *get_token_end(const char *begin, const char *IFS)
 int cmdline_parse_redirection(struct cmdline_parser *parser, struct cstr *token, 
 		struct redirection *re)
 {
-	struct mempool *pool;
 	const char *p;
 	struct cstr t;
 	int leftdeffd;
-	const char *IFS;
 	
-	pool = parser->pool;
-	IFS = parser->IFS;
 	re->flags = 0;
 	for (p = token->data; *p != '<' && *p != '>'; ++p);
 	if (*p == '<') {
@@ -313,14 +311,6 @@ int cmdline_parse_redirection(struct cmdline_parser *parser, struct cstr *token,
 		re->right.fd = cstr_atoi(&t);
 	}
 	else {
-		/*
-		p = get_token_begin(p, IFS);
-		if (p == NULL || *p == '\n') {
-			parser->errmsg = "unexpected newline";
-			return CMDLINE_PARSE_SYNTAX_ERROR;
-		}
-		re->right.pathname = make_cstr(pool, p, token->data + token->len - p);
-		*/
 		re->flags |= REDIRECT_FILE;
 	}
 	return CMDLINE_PARSE_OK;
@@ -342,6 +332,7 @@ int cmdline_parse(struct cmdline_parser *parser)
 	return retval;
 }
 
+/*
 #define PUSHBACK_TOKEN(pool, toklist, tokentype, tokenflags, tokbegin, tokend) \
 	ptok = p_alloc(pool, sizeof(struct token)); \
 	ptok->type = tokentype; \
@@ -353,6 +344,8 @@ int cmdline_parse(struct cmdline_parser *parser)
 	tokenflags = 0; \
 	tokbegin = p; \
 	state = PARSE_STATE_BEGIN;
+*/
+
 
 
 static int cmdline_parse_token(struct cmdline_parser *parser)
@@ -362,9 +355,8 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 	struct list *toklist;
 	int state;
 	const char *tokbegin;
-	const char *p;
+	const char *p, *close;
 	const char *IFS;
-	int tokentype;
 	int tokenflags;
 	struct token *ptok;
 	struct cstr ttok;
@@ -375,9 +367,32 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 	tokbegin = parser->tokbegin;
 	p = parser->p;
 	IFS = parser->IFS;
-	tokentype = 0;
 	tokenflags = 0;
 	retval = CMDLINE_PARSE_OK;
+
+#define PUSHBACK_TOKEN(ENDOFFSET, TOKENTYPE, TOKENFLAGS) \
+	p += ENDOFFSET; \
+	ptok = p_alloc(pool, sizeof(struct token)); \
+	ptok->type = TOKENTYPE; \
+	ptok->flags = tokenflags | TOKENFLAGS; \
+	ptok->tok.len = p - tokbegin; \
+	ptok->tok.data = tokbegin; \
+	l_pushback(toklist, ptok); \
+	tokenflags = 0; \
+	tokbegin = p; \
+	state = PARSE_STATE_BEGIN;
+
+#define ERROR_RETURN(MSG, RETCODE) \
+	parser->errmsg = MSG; \
+	retval = RETCODE; \
+	goto RETURN; 
+
+#define ENSURE_NOTEND(CH, RETVAL) \
+	if (CH == '\0') { \
+		retval = RETVAL; \
+		goto RETURN; \
+	}
+
 	while (*p != '\0') {
 		switch (state) {
 		case PARSE_STATE_BEGIN:
@@ -392,138 +407,92 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 			case '"':  state = PARSE_STATE_DQUOTE;++p;break;
 			case '`':  state = PARSE_STATE_BACKTICK;++p;break;
 			case '[':  state = PARSE_STATE_TEST;++p;break;
-			case '|':
-				tokentype = TOKEN_TYPE_PIPE;
-				p = tokbegin+1;
-				state = PARSE_STATE_DONE;
-				break;
+			case '|':  PUSHBACK_TOKEN(1, TOKEN_TYPE_PIPE, 0);break;
 			case '&':
 				if (p[1] == '&') {
-					tokentype = TOKEN_TYPE_DAND;
-					p = tokbegin +2;
+					PUSHBACK_TOKEN(2, TOKEN_TYPE_DAND, 0);
 				}
 				else {
-					tokentype = TOKEN_TYPE_AND;
-					p = tokbegin +1;
+					PUSHBACK_TOKEN(1, TOKEN_TYPE_AND, 0);
 				}
-				state = PARSE_STATE_DONE;
 				break;
-			case ';':
-				tokentype = TOKEN_TYPE_SIMICOLON;
-				p = tokbegin +1;
-				state = PARSE_STATE_DONE;
-				break;
+			case ';':PUSHBACK_TOKEN(1, TOKEN_TYPE_SIMICOLON, 0);break;
 			case '<':
 			case '>':
-				state = PARSE_STATE_REDIRECT;
-				p = tokbegin;
-				break;
-			case '(':
-				parser->errmsg = "invalid syntax: unexpected '('";
-				retval = CMDLINE_PARSE_SYNTAX_ERROR;
-				goto RETURN;
-			case ')':
-				parser->errmsg = "invalid syntax: unexpected ')'";
-				retval = CMDLINE_PARSE_SYNTAX_ERROR;
-				goto RETURN;
-			case '#':
-				state = PARSE_STATE_COMMENT;
-				break;
-			case '\n':
-				p = tokbegin +1;
-				/*
-				PUSHBACK_TOKEN(pool, toklist, TOKEN_TYPE_ENDLINE, 0, tokbegin, p);
-				*/
-				ptok = p_alloc(pool, sizeof(struct token)); 
-				ptok->type = TOKEN_TYPE_ENDLINE;
-				ptok->flags = tokenflags;
-				ptok->tok.len = p - tokbegin;
-				ptok->tok.data = tokbegin;
-				l_pushback(toklist, ptok);
-				tokentype = 0;
-				tokenflags = 0;
-				tokbegin = p;
-				state = PARSE_STATE_BEGIN;
-				break;
-			default:
-				p = tokbegin;
-				state = PARSE_STATE_NORMAL;
-				break;
+				 state = PARSE_STATE_REDIRECT;
+				 break;
+			case '(': ERROR_RETURN("invalid syntax: unexpected '('", CMDLINE_PARSE_SYNTAX_ERROR);
+			case ')': ERROR_RETURN("invalid syntax: unexpected ')'", CMDLINE_PARSE_SYNTAX_ERROR);
+			case '#': state = PARSE_STATE_COMMENT; break;
+			case '\n': PUSHBACK_TOKEN(1, TOKEN_TYPE_ENDLINE, 0);break;
+			default: state = PARSE_STATE_NORMAL; break;
 			}
 			break; /* goto next state */
 		case PARSE_STATE_COMMENT:
-			p = get_enclose(p, '\n');
-			if (*p == '\0') {
-				retval = CMDLINE_PARSE_CONTINUE;
-				goto RETURN;
-			}
-			tokentype = TOKEN_TYPE_COMMENT;
-			state = PARSE_STATE_DONE;
+			close = get_enclose(p, '\n');
+			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
+			ENSURE_NOTEND(*(close+1), CMDLINE_PARSE_CONTINUE);
+			p = close +1;
+			PUSHBACK_TOKEN(0, TOKEN_TYPE_COMMENT, 0);
 			break;
 		case PARSE_STATE_SQUOTE:
-			p = get_enclose(p, '\'');
-			tokentype = TOKEN_TYPE_NORMAL;
-			tokenflags |= TOKEN_FLAGS_SQUOTED;
-			state = PARSE_STATE_DONE;
+			close = get_enclose(p, '\'');
+			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
+			ENSURE_NOTEND(*(close+1), CMDLINE_PARSE_CONTINUE);
+			p = close +1;
+			PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, TOKEN_FLAGS_SQUOTED);
 			break;
 		case PARSE_STATE_DQUOTE:
-			p = get_enclose(p, '"');
-			tokentype = TOKEN_TYPE_NORMAL;
-			tokenflags |= TOKEN_FLAGS_DQUOTED;
-			state = PARSE_STATE_DONE;
+			close = get_enclose(p, '"');
+			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
+			ENSURE_NOTEND(*(close+1), CMDLINE_PARSE_CONTINUE);
+			p = close +1;
+			PUSHBACK_TOKEN(1, TOKEN_TYPE_NORMAL, TOKEN_FLAGS_DQUOTED);
 			break;
 		case PARSE_STATE_BACKTICK:
-			p = get_enclose(p, '`');
-			tokentype = TOKEN_TYPE_BACKTICK;
-			state = PARSE_STATE_DONE;
+			close = get_enclose(p, '`');
+			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
+			ENSURE_NOTEND(*(close+1), CMDLINE_PARSE_CONTINUE);
+			p = close +1;
+			PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
 			break;
 		case PARSE_STATE_TEST:
 			p = get_enclose(p, ']');
-			tokentype = TOKEN_TYPE_TEST;
-			state = PARSE_STATE_DONE;
+			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+			PUSHBACK_TOKEN(0, TOKEN_TYPE_TEST, 0);
 			break;
 		case PARSE_STATE_NORMAL:
-			while (*p != '\0' && strchr(IFS, *p) == NULL) {
-				if (*p == '\\') {
-					++p;
-					if (*p == '\0') {
-						retval = CMDLINE_PARSE_CONTINUE;
-						goto RETURN;
-					}
-					tokenflags |= TOKEN_FLAGS_BACKSLASH;
-				}
-				else if (*p == '(' && *(p+1) == ')') {
-					ptok = p_alloc(pool, sizeof(struct token));
-					ptok->type = TOKEN_TYPE_FUNCNAME;
-					ptok->flags = 0;
-					ptok->tok.len = p - tokbegin;
-					ptok->tok.data = tokbegin;
-					l_pushback(toklist, ptok);
-					state = PARSE_STATE_FUNCBODY;
-					tokentype = 0;
-					tokenflags = 0;
-					tokbegin = p +2;
-					break;
-				}
-				else if (*p == '>' || *p == '<') {
-					ttok.data = tokbegin;
-					ttok.len = p - tokbegin;
-					if (cstr_isnumeric(&ttok)) {
-						state = PARSE_STATE_REDIRECT;
-					}
-					else {
-						tokentype = TOKEN_TYPE_NORMAL;
-						state = PARSE_STATE_DONE;
-					}
-					break;
-				}
-				++p;
-			}
-			if (state != PARSE_STATE_NORMAL) {
+			if (strchr(IFS, *p) != NULL) {
+				PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
 				break;
 			}
-			tokentype = TOKEN_TYPE_NORMAL;
-			state = PARSE_STATE_DONE;
+			else if (*p == '\\') {
+				p += 1;
+				ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+				tokenflags |= TOKEN_FLAGS_BACKSLASH;
+			}
+			else if (*p == '(' ) {
+				if (*(p+1) == ')') {
+					PUSHBACK_TOKEN(0, TOKEN_TYPE_FUNCNAME, 0);
+					state = PARSE_STATE_FUNCBODY;
+					break;
+				}
+				else {
+					ERROR_RETURN("invalid syntax: unexpected charactor after '('",
+							CMDLINE_PARSE_SYNTAX_ERROR);
+				}
+			}
+			else if (*p == '>' || *p == '<') {
+				ttok.data = tokbegin;
+				ttok.len = p - tokbegin;
+				if (cstr_isnumeric(&ttok)) {
+					state = PARSE_STATE_REDIRECT;
+				}
+				else {
+					PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
+				}
+			}
+			++p;
 			break;
 		case PARSE_STATE_FUNCBODY:
 			tokbegin = get_token_begin(tokbegin, IFS);
@@ -541,8 +510,7 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 				retval = CMDLINE_PARSE_CONTINUE;
 				goto RETURN;
 			}
-			tokentype = TOKEN_TYPE_FUNCBODY;
-			state = PARSE_STATE_DONE;
+			PUSHBACK_TOKEN(0, TOKEN_TYPE_FUNCBODY, 0);
 			break;
 		case PARSE_STATE_REDIRECT:
 			if (*p == '>' && *(p+1) == '>') {
@@ -552,35 +520,13 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 				p = get_token_end(p+2, IFS);
 			}
 			else {
-				/*
-				p = get_token_begin(p+1, IFS);
-				if (*p == '\n') {
-					parser->errmsg = "unexpected newline";
-					retval = CMDLINE_PARSE_SYNTAX_ERROR;
-					goto RETURN;
-				}
-				p = get_token_end(p, IFS);
-				*/
 				p += 1;
 			}
-			if (*p == '\0') {
-				retval = CMDLINE_PARSE_CONTINUE;
-				goto RETURN;
-			}
-			tokentype = TOKEN_TYPE_REDIRECT;
-			state = PARSE_STATE_DONE;
+			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+			PUSHBACK_TOKEN(0, TOKEN_TYPE_REDIRECT, 0);
 			break;
-		case PARSE_STATE_DONE:
-			ptok = p_alloc(pool, sizeof(struct token));
-			ptok->type = tokentype;
-			ptok->flags = tokenflags;
-			ptok->tok.len = p - tokbegin;
-			ptok->tok.data = tokbegin;
-			l_pushback(toklist, ptok);
-			tokentype = 0;
-			tokenflags = 0;
-			tokbegin = p;
-			state = PARSE_STATE_BEGIN;
+		default :
+			ERROR_RETURN("parse error", CMDLINE_PARSE_SYNTAX_ERROR);
 			break;
 		}
 	}
@@ -613,6 +559,7 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 	infos = l_create(pool);
 	info = create_startup_info(pool);
 	redirect_file =0;
+	re = NULL;
 	for (node = parser->toklist->first; node != NULL; node = node->next) {
 		token = node->data;
 		if (redirect_file) {
@@ -625,6 +572,7 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 				else {
 					re->right.pathname = &(token->tok);
 				}
+				break;
 			default:
 				parser->errmsg = "invalid syntax";
 				return CMDLINE_PARSE_SYNTAX_ERROR;
@@ -690,7 +638,7 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 #ifdef DEBUG
 static int cmdline_parse_expand(struct cmdline_parser *parser)
 {
-	return PARSE_STATE_DONE;
+	return CMDLINE_PARSE_OK;
 }
 
 

@@ -344,15 +344,13 @@ int execute(struct mempool *pool, struct list *process_startup_infos)
 
 		/* get an array form 'params' */
 		paramscount = l_count(info->params);
-		if (paramscount != 0) {
-			params = p_alloc(pool, sizeof(char*) *(paramscount+1));
-			i = 0;
-			for (paramsnode = info->params->first; paramsnode != NULL;
-					paramsnode = paramsnode->next) {
-				params[i++] = p_cstrdup(pool, paramsnode->data);
-			}
-			params[i] = NULL;
+		params = p_alloc(pool, sizeof(char*) *(paramscount+1));
+		i = 0;
+		for (paramsnode = info->params->first; paramsnode != NULL;
+				paramsnode = paramsnode->next) {
+			params[i++] = p_cstrdup(pool, paramsnode->data);
 		}
+		params[i] = NULL;
 
 		/* fork and execute */
 		pid = fork();

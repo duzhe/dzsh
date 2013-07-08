@@ -11,10 +11,10 @@ dzsh: clean main.o list.o mempool.o cmdline_parser.o str.o ctags
 debug: 
 	make clean 
 	CFLAGS="-g -Wall -D DEBUG" make dzsh
-test: cmdline_parse_test
-	./cmdline_parse_test
-cmdline_parse_test:cmdline_parse_test.o list.o mempool.o cmdline_parser.o str.o
-	gcc -g -Wall cmdline_parse_test.o list.o mempool.o cmdline_parser.o str.o -o cmdline_parse_test
+test: test_cmdline_parse
+	./test_cmdline_parse
+test_cmdline_parse:test_cmdline_parse.o list.o mempool.o cmdline_parser.o str.o
+	gcc -g -Wall test_cmdline_parse.o list.o mempool.o cmdline_parser.o str.o -o test_cmdline_parse
 
 main.o:main.c list.h mempool.h
 list.o:list.c list.h mempool.h
