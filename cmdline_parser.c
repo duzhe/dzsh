@@ -20,15 +20,6 @@ static int isnumeric(const char *p)
 }
 */
 
-struct tokenmap {
-	int nextstate;
-	int offset;
-};
-
-/*
-static struct tokenmap map_token_begin[256];
-*/
-
 #define PARSE_STATE_BEGIN		0x02
 #define PARSE_STATE_NORMAL 		0x03
 /*
@@ -72,6 +63,7 @@ struct cmdline_parser
 
 typedef int (*cmdline_parse_phase_func)(struct cmdline_parser *);
 static int cmdline_parse_token(struct cmdline_parser *parser);
+static int cmdline_ensure_cmdline_end(struct cmdline_parser *parser);
 static int cmdline_parse_classication(struct cmdline_parser *parser);
 #ifdef DEBUG
 static int cmdline_parse_expand(struct cmdline_parser *parser);
@@ -84,6 +76,7 @@ static cmdline_parse_phase_func phase_func[] = {
 #ifdef DEBUG
 	&cmdline_parse_token_print,
 #endif
+	cmdline_ensure_cmdline_end,
 	&cmdline_parse_classication,
 	/*
 	&cmdline_parse_end,
@@ -328,6 +321,7 @@ int cmdline_parse(struct cmdline_parser *parser)
 		if (retval != CMDLINE_PARSE_OK) {
 			break; 
 		}
+		parser->phase += 1;
 	}
 	return retval;
 }
@@ -431,28 +425,24 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 		case PARSE_STATE_COMMENT:
 			close = get_enclose(p, '\n');
 			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
-			ENSURE_NOTEND(*(close+1), CMDLINE_PARSE_CONTINUE);
 			p = close +1;
 			PUSHBACK_TOKEN(0, TOKEN_TYPE_COMMENT, 0);
 			break;
 		case PARSE_STATE_SQUOTE:
 			close = get_enclose(p, '\'');
 			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
-			ENSURE_NOTEND(*(close+1), CMDLINE_PARSE_CONTINUE);
 			p = close +1;
 			PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, TOKEN_FLAGS_SQUOTED);
 			break;
 		case PARSE_STATE_DQUOTE:
 			close = get_enclose(p, '"');
 			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
-			ENSURE_NOTEND(*(close+1), CMDLINE_PARSE_CONTINUE);
 			p = close +1;
 			PUSHBACK_TOKEN(1, TOKEN_TYPE_NORMAL, TOKEN_FLAGS_DQUOTED);
 			break;
 		case PARSE_STATE_BACKTICK:
 			close = get_enclose(p, '`');
 			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
-			ENSURE_NOTEND(*(close+1), CMDLINE_PARSE_CONTINUE);
 			p = close +1;
 			PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
 			break;
@@ -534,8 +524,24 @@ RETURN:
 	parser->state = state;
 	parser->tokbegin = tokbegin;
 	parser->p = p;
-	parser->phase += 1;
 	return retval;
+}
+
+
+static int cmdline_ensure_cmdline_end(struct cmdline_parser *parser)
+{
+	struct lnode *node;
+	struct token *token;
+
+	node = parser->toklist->last;
+	if (node == NULL) {
+		return CMDLINE_PARSE_CONTINUE;
+	}
+	token = node->data;
+	if (token->type == TOKEN_TYPE_ENDLINE) {
+		return CMDLINE_PARSE_OK;
+	}
+	return CMDLINE_PARSE_CONTINUE;
 }
 
 
@@ -630,7 +636,6 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 			break;
 		}
 	}
-	parser->phase += 1;
 	return CMDLINE_PARSE_DONE;
 }
 
@@ -655,7 +660,6 @@ static int cmdline_parse_token_print(struct cmdline_parser *parser)
 		cstr_print(&tok->tok, stdout);
 		printf("\n");
 	}
-	parser->phase += 1;
 	return CMDLINE_PARSE_OK;
 }
 
