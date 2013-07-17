@@ -347,7 +347,7 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 	struct list *toklist;
 	int state;
 	const char *tokbegin;
-	const char *p, *close;
+	const char *p;
 	const char *IFS;
 	int tokenflags;
 	struct token *ptok;
@@ -420,66 +420,63 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 			}
 			break; /* goto next state */
 		case PARSE_STATE_COMMENT:
-			close = get_enclose(p, '\n');
-			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
-			p = close +1;
-			PUSHBACK_TOKEN(0, TOKEN_TYPE_COMMENT, 0);
+			p = get_enclose(p, '\n');
+			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+			PUSHBACK_TOKEN(1, TOKEN_TYPE_COMMENT, 0);
 			break;
 		case PARSE_STATE_SQUOTE:
-			close = get_enclose(p, '\'');
-			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
-			p = close +1;
-			PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, TOKEN_FLAGS_SQUOTED);
+			p = get_enclose(p, '\'');
+			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+			PUSHBACK_TOKEN(1, TOKEN_TYPE_NORMAL, TOKEN_FLAGS_SQUOTED);
 			break;
 		case PARSE_STATE_DQUOTE:
-			close = get_enclose(p, '"');
-			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
-			p = close +1;
+			p = get_enclose(p, '"');
+			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
 			PUSHBACK_TOKEN(1, TOKEN_TYPE_NORMAL, TOKEN_FLAGS_DQUOTED);
 			break;
 		case PARSE_STATE_BACKTICK:
-			close = get_enclose(p, '`');
-			ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
-			p = close +1;
-			PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
+			p = get_enclose(p, '`');
+			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+			PUSHBACK_TOKEN(1, TOKEN_TYPE_NORMAL, 0);
 			break;
 		case PARSE_STATE_TEST:
 			p = get_enclose(p, ']');
 			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
-			PUSHBACK_TOKEN(0, TOKEN_TYPE_TEST, 0);
+			PUSHBACK_TOKEN(1, TOKEN_TYPE_TEST, 0);
 			break;
 		case PARSE_STATE_NORMAL:
-			if (strchr(IFS, *p) != NULL) {
-				PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
-				break;
-			}
-			else if (*p == '\\') {
-				p += 1;
-				ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+			switch (*p) {
+			case '\\':
+				ENSURE_NOTEND(*(p+1), CMDLINE_PARSE_CONTINUE);
 				tokenflags |= TOKEN_FLAGS_BACKSLASH;
-			}
-			else if (*p == '(' ) {
-				if (*(p+1) == ')') {
-					PUSHBACK_TOKEN(0, TOKEN_TYPE_FUNCNAME, 0);
-					state = PARSE_STATE_FUNCBODY;
-					break;
-				}
-				else {
+				p+=2;
+				break;
+			case '(' :
+				if (*(p+1) != ')') {
 					ERROR_RETURN("invalid syntax: unexpected charactor after '('",
 							CMDLINE_PARSE_SYNTAX_ERROR);
 				}
-			}
-			else if (*p == '>' || *p == '<') {
+				PUSHBACK_TOKEN(0, TOKEN_TYPE_FUNCNAME, 0);
+				state = PARSE_STATE_FUNCBODY;
+				p+=2;
+				break;
+			case '>':
+			case '<':
 				ttok.data = tokbegin;
 				ttok.len = p - tokbegin;
-				if (cstr_isnumeric(&ttok)) {
-					state = PARSE_STATE_REDIRECT;
-				}
-				else {
+				if (p != tokbegin && !cstr_isnumeric(&ttok)) {
 					PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
 				}
+				state = PARSE_STATE_REDIRECT;
+				break;
+			default:
+				if (strchr(IFS, *p) != NULL) {
+					PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
+					break;
+				}
+				p++;
+				break;
 			}
-			++p;
 			break;
 		case PARSE_STATE_FUNCBODY:
 			tokbegin = get_token_begin(tokbegin, IFS);
@@ -509,7 +506,6 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 			else {
 				p += 1;
 			}
-			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
 			PUSHBACK_TOKEN(0, TOKEN_TYPE_REDIRECT, 0);
 			break;
 		default :
