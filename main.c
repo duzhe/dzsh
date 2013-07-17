@@ -441,6 +441,19 @@ void print_startup_infos(struct list *infos)
 #endif
 
 
+BOOL is_console(int fd)
+{
+	int retval;
+	struct stat st;
+	memset(&st, 0, sizeof(st));
+	retval = fstat(fd, &st);
+	if (retval != 0) {
+		return FALSE;
+	}
+	return S_ISCHR(st.st_mode);
+}
+
+
 int main(int argc, char **argv)
 {
 	struct mempool *static_pool;
@@ -453,6 +466,7 @@ int main(int argc, char **argv)
 	struct mempool *pool;
 	struct cmdline_parser *parser;
 	struct lnode *node;
+	BOOL interactive;
 
 	/* global initialize */
 	static_pool = p_create(8196);
@@ -469,9 +483,6 @@ int main(int argc, char **argv)
 			fprintf(stderr, "Warning: accept one argument only," \
 					"more arguments will be ignored\n");
 		}
-		/*
-		pathname = getfullpathname(static_pool, dup_cstr(static_pool, argv[1])); 
-		*/
 		instream = fopen(argv[1], "r");
 		if (instream == NULL) {
 			fprintf(stderr, "%s: cannot access file %s: %s\n", argv[0], 
@@ -480,6 +491,12 @@ int main(int argc, char **argv)
 		}
 	}
 
+	if (instream == stdin && is_console(STDIN_FILENO)) {
+		interactive = TRUE;
+	}
+	else {
+		interactive = FALSE;
+	}
 	/* init */
 	pool = p_create(8192);
 
@@ -499,7 +516,9 @@ int main(int argc, char **argv)
 		parser = create_cmdline_parser(pool,  cmdlist, &buf, env->IFS);
 
 		/* read commandline and parse */
-		fputs(env->PS1, stdout);
+		if (interactive) {
+			fputs(env->PS1, stdout);
+		}
 		retval = CMDLINE_PARSE_EMPTY;
 		for (;;) {
 			line = cmdline_buf_getline(&buf, instream);
@@ -515,7 +534,9 @@ int main(int argc, char **argv)
 
 			retval = cmdline_parse(parser);
 			if (retval == CMDLINE_PARSE_CONTINUE) {
-				fputs(env->PS2, stdout);
+				if (interactive) {
+					fputs(env->PS2, stdout);
+				}
 				continue;
 			}
 			break;
