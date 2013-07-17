@@ -49,12 +49,11 @@ struct cmdline_parser
 {
 	struct mempool *pool;
 	struct list *cmdlist;
-	const char *cmdlinebuf;
+	struct cmdline_buf *cmdlinebuf;
 	const char *IFS;
 
 	int phase;
 	int state;
-	const char *tokbegin;
 	const char *p;
 	struct process_startup_info *info;
 	struct list *toklist;
@@ -131,20 +130,19 @@ struct process_startup_info *create_startup_info(struct mempool *pool)
 
 
 struct cmdline_parser *create_cmdline_parser(struct mempool *pool, 
-		struct list *cmdlist, char *cmdlinebuf,
+		struct list *cmdlist, struct cmdline_buf *buf,
 		const char *IFS)
 {
 	struct cmdline_parser *parser;
 	parser = p_alloc(pool, sizeof(struct cmdline_parser));
 	parser->pool = pool;
 	parser->cmdlist = cmdlist;
-	parser->cmdlinebuf = cmdlinebuf;
+	parser->cmdlinebuf = buf;
 	parser->IFS = IFS;
 	parser->toklist = l_create(pool);
 	parser->phase = PARSE_PHASE_TOKEN;
 	parser->state = PARSE_STATE_BEGIN;
-	parser->p = cmdlinebuf;
-	parser->tokbegin = cmdlinebuf;
+	parser->p = buf->data;
 	return parser;
 }
 
@@ -358,7 +356,7 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 	pool = parser->pool;
 	toklist = parser->toklist;
 	state = parser->state;
-	tokbegin = parser->tokbegin;
+	tokbegin = parser->cmdlinebuf->data;
 	p = parser->p;
 	IFS = parser->IFS;
 	tokenflags = 0;
@@ -370,7 +368,7 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 	ptok->type = TOKENTYPE; \
 	ptok->flags = tokenflags | TOKENFLAGS; \
 	ptok->tok.len = p - tokbegin; \
-	ptok->tok.data = tokbegin; \
+	ptok->tok.data = p_strndup(pool, tokbegin, p-tokbegin); \
 	l_pushback(toklist, ptok); \
 	tokenflags = 0; \
 	tokbegin = p; \
@@ -390,12 +388,11 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 	while (*p != '\0') {
 		switch (state) {
 		case PARSE_STATE_BEGIN:
-			tokbegin = get_token_begin(tokbegin, IFS);
-			if (*tokbegin == '\0') {
+			p = tokbegin = get_token_begin(tokbegin, IFS);
+			if (*p == '\0') {
 				retval =  CMDLINE_PARSE_OK;
 				goto RETURN;
 			}
-			p = tokbegin;
 			switch(*p) {
 			case '\'': state = PARSE_STATE_SQUOTE;++p;break;
 			case '"':  state = PARSE_STATE_DQUOTE;++p;break;
@@ -521,9 +518,9 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 		}
 	}
 RETURN:
+	cmdline_buf_parsed(parser->cmdlinebuf, tokbegin);
+	parser->p = p - (tokbegin - parser->cmdlinebuf->data);
 	parser->state = state;
-	parser->tokbegin = tokbegin;
-	parser->p = p;
 	return retval;
 }
 
@@ -653,11 +650,16 @@ static int cmdline_parse_token_print(struct cmdline_parser *parser)
 	struct lnode *node;
 	struct token *tok;
 	count = l_count(parser->toklist);
-	fprintf(stderr, "got %d tokens:\n", count);
+	printf("got %d tokens:\n", count);
 	for (i=0,node = parser->toklist->first; i< count; ++i,node = node->next) {
 		tok = node->data;
 		printf(" %d %d %d: ", i, tok->type, tok->flags);
-		cstr_print(&tok->tok, stdout);
+		if (tok->type == TOKEN_TYPE_ENDLINE) {
+			printf("\\n");
+		}
+		else {
+			cstr_print(&tok->tok, stdout);
+		}
 		printf("\n");
 	}
 	return CMDLINE_PARSE_OK;

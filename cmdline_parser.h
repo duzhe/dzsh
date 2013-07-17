@@ -1,5 +1,6 @@
 #ifndef _CMDLINE_PARSER_H_INCLUDE
 #define _CMDLINE_PARSER_H_INCLUDE
+#include <stdio.h>
 #include "bool.h"
 
 struct mempool;
@@ -11,12 +12,30 @@ struct cstr;
 #define REDIRECT_FILE (0x02)
 #define REDIRECT_APPEND (0x04)
 
+#ifndef READBUFSIZE 
+#define READBUFSIZE 8192
+#endif
+
+#if READBUFSIZE < 16
+#define READBUF 16
+#endif
+
 /*
 struct cmdlist 
 {
 	struct list *command;
 };
 */
+
+struct cmdline_buf {
+	char data[READBUFSIZE];
+	char *p;
+	size_t space;
+};
+
+void cmdline_buf_clear(struct cmdline_buf *);
+const char *cmdline_buf_getline(struct cmdline_buf *, FILE* infile);
+void cmdline_buf_parsed(struct cmdline_buf *, const char *parsed);
 
 union redirection_side {
 	int fd;
@@ -41,7 +60,7 @@ struct process_startup_info *create_startup_info(struct mempool *pool);
 
 struct cmdline_parser;
 struct cmdline_parser *create_cmdline_parser(struct mempool *pool, 
-		struct list *cmdlist, char *cmdlinebuf,
+		struct list *cmdlist, struct cmdline_buf  *buf,
 		const char *IFS);
 
 #define CMDLINE_PARSE_DONE 0x00

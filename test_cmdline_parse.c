@@ -68,29 +68,27 @@ void print_startup_infos(struct list *infos)
 int main(int argc, char **argv)
 {
 	const char *IFS;
-	char *line;
 	struct mempool *pool;
 	struct list *cmdlist;
 	struct list *process_startup_infos;
 	struct lnode *node;
 	struct cmdline_parser *parser;
 	int i;
-	char *testcases[] = {
-		/*
-		"ls\n",
-		"ls -l\n",
-		*/
-		"ls 'a c'\n",
-		"ls -a > /tmp/aaa\n",
-		"ls -l -a >> /tmp/aaa\n",
-		"sort < /tmp/aaa > /tmp/bbb\n",
-		"ls -la >> /tmp/aaa 2>&1\n",
-		"ls -l 2> /dev/null | sort -k1 \n",
-		"echo -n hello > /tmp/ttt 2>&1\n",
-		"cat /tmp/ttt | sort -k2 -nr | uniq -c > /tmp/sorted\n",
-		"cat /tmp/ttt | sort -k2 -nr ; ls > /tmp/ttt\n",
-	};
-
+	struct cmdline_buf buf;
+	int len;
+    char *testcases[] = {
+               "ls\n",
+               "ls -l\n",
+               "ls 'a c'\n",
+               "ls -a > /tmp/aaa\n",
+               "ls -l -a >> /tmp/aaa\n",
+               "sort < /tmp/aaa > /tmp/bbb\n",
+               "ls -la >> /tmp/aaa 2>&1\n",
+               "ls -l 2> /dev/null | sort -k1 \n",
+               "echo -n hello > /tmp/ttt 2>&1\n",
+               "cat /tmp/ttt | sort -k2 -nr | uniq -c > /tmp/sorted\n",
+               "cat /tmp/ttt | sort -k2 -nr ; ls > /tmp/ttt\n",
+   };
 
 
 	IFS = " \t\n";
@@ -98,9 +96,13 @@ int main(int argc, char **argv)
 
 	for (i=0; i< sizeof(testcases)/sizeof(*testcases); ++i) {
 		p_clear(pool);
+		cmdline_buf_clear(&buf);
 		cmdlist = l_create(pool);
-		line = p_strdup(pool, testcases[i]);
-		parser = create_cmdline_parser(pool,  cmdlist, line, IFS);
+		len = strlen(testcases[i]);
+		memcpy(buf.data, testcases[i], len+1);
+		buf.p += len;
+		buf.space -= len;
+		parser = create_cmdline_parser(pool,  cmdlist, &buf, IFS);
 
 		printf("orig cmdline:\n\t%s", testcases[i]);
 		/* parse commandline */

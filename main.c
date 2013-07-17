@@ -386,14 +386,66 @@ int execute(struct mempool *pool, struct list *process_startup_infos)
 }
 
 
+#ifdef PRINT_STARTUP_INFO_ONLY
+void print_startup_infos(struct list *infos)
+{
+	struct process_startup_info *info;
+	struct lnode *infonode;
+	struct cstr *param;
+	struct lnode *paramnode;
+	struct redirection *re;
+	struct lnode *renode;
+	
+	for (infonode = infos->first; infonode != NULL; infonode = infonode->next) {
+		info = infonode->data;
+		for (paramnode = info->params->first; paramnode != NULL; paramnode = paramnode->next) {
+			param = paramnode->data;
+			cstr_print(param, stdout);
+			fputc(' ', stdout);
+		}
+		for (renode = info->redirections->first; renode != NULL; renode = renode->next) {
+			re = renode->data;
+			switch (re->flags) {
+				case 0:
+					printf("fd%d->fd%d ", re->leftfd, re->right.fd);
+					break;
+				case 1:
+					printf("fd%d<-fd%d ", re->right.fd, re->leftfd);
+					break;
+				case 2:
+					printf("fd%d->", re->leftfd);
+					cstr_print(re->right.pathname, stdout);
+					fputc(' ', stdout);
+					break;
+				case 3:
+					printf("fd%d<-", re->leftfd);
+					cstr_print(re->right.pathname, stdout);
+					fputc(' ', stdout);
+					break;
+				case 6:
+					printf("fd%d->>", re->leftfd);
+					cstr_print(re->right.pathname, stdout);
+					fputc(' ', stdout);
+					break;
+				default:
+					printf("unexpected flags %d\n", re->flags);
+					break;
+			}
+		}
+		if (infonode->next != NULL) {
+			printf(" | ");
+		}
+	}
+	printf("\n");
+}
+#endif
+
+
 int main(int argc, char **argv)
 {
 	struct mempool *static_pool;
-	char buf[1024];
-	char *pbuf;
-	char *line;
-	size_t len;
-	const char *pathname;
+	struct cmdline_buf buf;
+	const char *line;
 	int retval;
 	FILE *instream;
 	struct list *cmdlist;
@@ -417,8 +469,10 @@ int main(int argc, char **argv)
 			fprintf(stderr, "Warning: accept one argument only," \
 					"more arguments will be ignored\n");
 		}
+		/*
 		pathname = getfullpathname(static_pool, dup_cstr(static_pool, argv[1])); 
-		instream = fopen(pathname, "r");
+		*/
+		instream = fopen(argv[1], "r");
 		if (instream == NULL) {
 			fprintf(stderr, "%s: cannot access file %s: %s\n", argv[0], 
 					argv[1], strerror(errno));
@@ -440,21 +494,17 @@ int main(int argc, char **argv)
 	for (;;) {
 		/* clear and reinit */
 		p_clear(pool);
-		/*
-		process_startup_infos = l_create(pool);
-		parser = create_cmdline_parser(pool,  process_startup_infos, buf, env->IFS);
-		*/
+		cmdline_buf_clear(&buf);
 		cmdlist = l_create(pool);
-		parser = create_cmdline_parser(pool,  cmdlist, buf, env->IFS);
+		parser = create_cmdline_parser(pool,  cmdlist, &buf, env->IFS);
 
 		/* read commandline and parse */
 		fputs(env->PS1, stdout);
-		pbuf = buf;
 		retval = CMDLINE_PARSE_EMPTY;
 		for (;;) {
-			line = fgets(pbuf, sizeof(buf) - (pbuf-buf), instream);
+			line = cmdline_buf_getline(&buf, instream);
 			if (line == NULL) {
-				if (pbuf == buf) {
+				if (buf.p == buf.data) {
 					retval = CMDLINE_READING_TERMINATE;
 				}
 				else {
@@ -462,8 +512,6 @@ int main(int argc, char **argv)
 				}
 				break;
 			}
-			len = strlen(pbuf);
-			pbuf += len;
 
 			retval = cmdline_parse(parser);
 			if (retval == CMDLINE_PARSE_CONTINUE) {
@@ -494,7 +542,11 @@ int main(int argc, char **argv)
 			if (!check(pool, process_startup_infos)){
 				continue;
 			}
+#ifdef PRINT_STARTUP_INFO_ONLY
+			print_startup_infos(process_startup_infos);
+#else
 			execute(pool, process_startup_infos);
+#endif
 		}
 	}
 	p_destroy(static_pool);
