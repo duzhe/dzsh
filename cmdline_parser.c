@@ -347,7 +347,7 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 	struct list *toklist;
 	int state;
 	const char *tokbegin;
-	const char *p;
+	const char *p, *close;
 	const char *IFS;
 	int tokenflags;
 	struct token *ptok;
@@ -480,10 +480,7 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 			break;
 		case PARSE_STATE_FUNCBODY:
 			tokbegin = get_token_begin(tokbegin, IFS);
-			if (*tokbegin == '\0') {
-				retval = CMDLINE_PARSE_CONTINUE;
-				goto RETURN;
-			}
+			ENSURE_NOTEND(*tokbegin, CMDLINE_PARSE_CONTINUE);
 			if (*tokbegin != '{' ) {
 				parser->errmsg = "invalid syntax: expected '{'";
 				retval = CMDLINE_PARSE_SYNTAX_ERROR;
@@ -501,7 +498,10 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 				p+=1;
 			}
 			if (*(p+1) == '&') {
-				p = get_token_end(p+2, IFS);
+				ENSURE_NOTEND(*(p+2), CMDLINE_PARSE_CONTINUE);
+				close = get_token_end(p+2, IFS);
+				ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
+				p = close;
 			}
 			else {
 				p += 1;
