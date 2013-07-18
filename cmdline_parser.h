@@ -36,6 +36,7 @@ struct cmdline_buf {
 void cmdline_buf_clear(struct cmdline_buf *);
 const char *cmdline_buf_getline(struct cmdline_buf *, FILE* infile);
 void cmdline_buf_parsed(struct cmdline_buf *, const char *parsed);
+BOOL cmdline_buf_line_complete(struct cmdline_buf *);
 
 union redirection_side {
 	int fd;
@@ -70,6 +71,7 @@ struct cmdline_parser *create_cmdline_parser(struct mempool *pool,
 #define CMDLINE_PARSE_EMPTY 0x04
 #define CMDLINE_READING_TERMINATE 0x05
 #define CMDLINE_READING_ERROR 0x06
+#define CMDLINE_PARSE_TOKEN_TOO_LONG 0x07
 /* OK is an internal state, cmdline_parse will return DONE, CONTINUE
  * or SYNTAX_ERROR ONLY */
 int cmdline_parse(struct cmdline_parser *parser);

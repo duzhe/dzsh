@@ -40,3 +40,14 @@ void cmdline_buf_parsed(struct cmdline_buf *buf, const char *parsed)
 	}
 }
 
+
+BOOL cmdline_buf_line_complete(struct cmdline_buf *buf)
+{
+	if (buf->space != 1) {
+		return TRUE;
+	}
+	if (*(buf->p -1) == '\n') {
+		return TRUE;
+	}
+	return FALSE;
+}

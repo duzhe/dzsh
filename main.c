@@ -46,7 +46,7 @@ int initialize_env(struct mempool *pool, int argc, char **argv)
 
 	env->PS1 = getenv("PS1");
 	if (env->PS1 == NULL) {
-		env->PS1 = "dzsh $";
+		env->PS1 = "dzsh $ ";
 	}
 	
 	env->PS2 = getenv("PS2");
@@ -467,6 +467,7 @@ int main(int argc, char **argv)
 	struct cmdline_parser *parser;
 	struct lnode *node;
 	BOOL interactive;
+	BOOL line_complete;
 
 	/* global initialize */
 	static_pool = p_create(8196);
@@ -497,6 +498,9 @@ int main(int argc, char **argv)
 	else {
 		interactive = FALSE;
 	}
+#ifdef INTERACTIVE
+	interactive = TRUE;
+#endif
 	/* init */
 	pool = p_create(8192);
 
@@ -517,11 +521,16 @@ int main(int argc, char **argv)
 
 		/* read commandline and parse */
 		if (interactive) {
-			fputs(env->PS1, stdout);
+			fputs(env->PS1, stderr);
 		}
 		retval = CMDLINE_PARSE_EMPTY;
 		for (;;) {
+			if (buf.space <= 1) {
+				retval = CMDLINE_PARSE_TOKEN_TOO_LONG;
+				break;
+			}
 			line = cmdline_buf_getline(&buf, instream);
+			line_complete = cmdline_buf_line_complete(&buf);
 			if (line == NULL) {
 				if (buf.p == buf.data) {
 					retval = CMDLINE_READING_TERMINATE;
@@ -533,13 +542,12 @@ int main(int argc, char **argv)
 			}
 
 			retval = cmdline_parse(parser);
-			if (retval == CMDLINE_PARSE_CONTINUE) {
-				if (interactive) {
-					fputs(env->PS2, stdout);
-				}
-				continue;
+			if (retval != CMDLINE_PARSE_CONTINUE) {
+				break;
 			}
-			break;
+			if (interactive && line_complete) {
+				fputs(env->PS2, stderr);
+			}
 		}
 		if (retval == CMDLINE_READING_TERMINATE) {
 			fputc('\n', stdout);
@@ -551,6 +559,10 @@ int main(int argc, char **argv)
 		}
 		if (retval == CMDLINE_PARSE_EMPTY) {
 			fputc('\n', stdout);
+			continue;
+		}
+		if (retval == CMDLINE_PARSE_TOKEN_TOO_LONG) {
+			fprintf(stderr, "%s: error parsing commandline: token is too long\n", argv[0]);
 			continue;
 		}
 		if (retval != CMDLINE_PARSE_DONE) {
