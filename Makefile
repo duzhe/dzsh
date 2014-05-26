@@ -3,7 +3,7 @@ ver = release
 ifeq ($(ver), debug)
 CFLAGS=-g -Wall -DDEBUG -DPRINT_STARTUP_INFO_ONLY -DREADBUFSIZE=16
 else
-CFLAGS=-g -Wall -O2
+CFLAGS=-g -Wall
 endif
 
 dzsh: clean main.o list.o mempool.o cmdline_parser.o str.o cmdline_buf.o ctags 

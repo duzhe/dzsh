@@ -80,6 +80,7 @@ int initialize_env(struct mempool *pool, int argc, char **argv)
 				env->argv[0], strerror(errno));
 		return -1;
 	}
+	env->cwd->len = strlen(env->cwd->data);
 	return 0;
 }
 
@@ -106,8 +107,6 @@ int do_redirect(struct list *redirections)
 {
 	struct mempool *pool;
 	struct redirection *p;
-	int fromfd;
-	int tofd;
 	int retval;
 	const char *filename;
 	struct lnode *node;
@@ -124,7 +123,8 @@ int do_redirect(struct list *redirections)
 			}
 			else {
 				if (p->flags & REDIRECT_APPEND) {
-					rightfd = open(filename, O_APPEND|O_WRONLY);
+					rightfd = open(filename, O_CREAT|O_APPEND|O_WRONLY,
+							S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
 				}
 				else {
 					rightfd = open(filename, O_CREAT|O_TRUNC|O_WRONLY,
@@ -143,22 +143,15 @@ int do_redirect(struct list *redirections)
 			rightfd = p->right.fd;
 		}
 
-		if (p->flags & REDIRECT_IN) {
-			fromfd = rightfd;
-			tofd = p->leftfd;
+		retval = dup2(rightfd, p->leftfd);
+		if (p->flags & REDIRECT_FILE) {
+			close(rightfd);
 		}
-		else {
-			fromfd = p->leftfd;
-			tofd = rightfd;
-		}
-		retval = dup2(tofd, fromfd);
+
 		if (retval == -1) {
 			fprintf(stderr, "%s: cannot redirect file: %s\n", env->argv[0], 
 					strerror(errno));
 			return -1;
-		}
-		if (p->flags & REDIRECT_FILE) {
-			close(rightfd);
 		}
 	}
 	return 0;
