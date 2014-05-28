@@ -20,6 +20,7 @@ static int isnumeric(const char *p)
 }
 */
 
+#define PARSE_STATE_SIMPLE 		0x01
 #define PARSE_STATE_BEGIN		0x02
 #define PARSE_STATE_NORMAL 		0x03
 /*
@@ -84,11 +85,13 @@ static cmdline_parse_phase_func phase_func[] = {
 };
 
 
+#define TOKEN_TYPE_SIMPLE				0x00
 #define TOKEN_TYPE_NORMAL 				0x01
 #define TOKEN_TYPE_REDIRECT				0x02
 #define TOKEN_TYPE_PIPE					0x03
 #define TOKEN_TYPE_AND					0x03
-#define TOKEN_TYPE_DAND					0x04
+#define TOKEN_TYPE_LOGIC_AND			0x04
+#define TOKEN_TYPE_LOGIC_OR				0x0c
 #define TOKEN_TYPE_SIMICOLON			0x05
 #define TOKEN_TYPE_ENDLINE				0x06
 #define TOKEN_TYPE_TERMINATE			0x07
@@ -97,11 +100,13 @@ static cmdline_parse_phase_func phase_func[] = {
 #define TOKEN_TYPE_JOB					0x09
 #define TOKEN_TYPE_FUNCNAME				0x0a
 #define TOKEN_TYPE_FUNCBODY				0x0b
-/*
-#define TOKEN_TYPE_SQUOTE				0x0c
-#define TOKEN_TYPE_DQUOTE				0x0d
-*/
 #define TOKEN_TYPE_BACKTICK				0x0e
+#define TOKEN_TYPE_VARIABLE				0x0f
+#define TOKEN_TYPE_SPECIALVAR			0x10
+#define TOKEN_TYPE_SUBCMDLINE			0x12
+#define TOKEN_TYPE_DQUOTED				0x13
+#define TOKEN_TYPE_SQUOTED				0x14
+#define TOKEN_TYPE_BACKSLASH			0x15
 
 #define TOKEN_FLAGS_VARIABLE			0x01
 #define TOKEN_FLAGS_SPECIALVAR			0x02
@@ -116,6 +121,57 @@ struct token {
 	unsigned int flags:16;
 	struct cstr tok;
 };
+/*
+struct token {
+	unsigned int type;
+	struct {
+		struct cstr tok;
+		struct list* subtok;
+	}
+};
+*/
+
+
+/*
+struct token *create_tok(struct mempool *pool, unsigned int type,
+		const char *tokbegin=NULL, const char *tokend=NULL)
+{
+	struct token *tok = (struct token *)p_alloc(sizeof(struct token));
+	tok->type = type;
+	switch(type) {
+	case TOKEN_TYPE_SIMPLE:
+	case TOKEN_TYPE_REDIRECT:
+	case TOKEN_TYPE_PIPE:
+	case TOKEN_TYPE_AND:
+	case TOKEN_TYPE_LOGIC_AND:		
+	case TOKEN_TYPE_SIMICOLON:
+	case TOKEN_TYPE_ENDLINE:
+	case TOKEN_TYPE_TERMINATE:
+	case TOKEN_TYPE_COMMENT:
+	case TOKEN_TYPE_TEST:
+	case TOKEN_TYPE_JOB:
+	case TOKEN_TYPE_FUNCNAME:
+	case TOKEN_TYPE_FUNCBODY:
+	case TOKEN_TYPE_BACKTICK:
+	case TOKEN_TYPE_VARIABLE:
+		tok->data = p_strndup(pool, tokbegin, tokend-tokbegin);
+		tok->len = tokend - tokbegin;
+		break;
+	case TOKEN_TYPE_NORMAL:
+	case TOKEN_TYPE_SPECIALVAR:
+	case TOKEN_TYPE_SUBCMDLINE:
+	case TOKEN_TYPE_DQUOTED:
+	case TOKEN_TYPE_SQUOTED:
+	case TOKEN_TYPE_BACKSLASH:
+		tok->subtok = l_create(pool);
+		break;
+	default:
+		assert(false);
+		break;
+	}
+	return tok;
+}
+*/
 
 
 struct process_startup_info *create_startup_info(struct mempool *pool)
@@ -324,21 +380,6 @@ int cmdline_parse(struct cmdline_parser *parser)
 	return retval;
 }
 
-/*
-#define PUSHBACK_TOKEN(pool, toklist, tokentype, tokenflags, tokbegin, tokend) \
-	ptok = p_alloc(pool, sizeof(struct token)); \
-	ptok->type = tokentype; \
-	ptok->flags = tokenflags; \
-	ptok->tok.len = p - tokbegin; \
-	ptok->tok.data = tokbegin; \
-	l_pushback(toklist, ptok); \
-	tokentype = 0; \
-	tokenflags = 0; \
-	tokbegin = p; \
-	state = PARSE_STATE_BEGIN;
-*/
-
-
 
 static int cmdline_parse_token(struct cmdline_parser *parser)
 {
@@ -366,7 +407,7 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 	p += ENDOFFSET; \
 	ptok = p_alloc(pool, sizeof(struct token)); \
 	ptok->type = TOKENTYPE; \
-	ptok->flags = tokenflags | TOKENFLAGS; \
+	ptok->flags = tokenflags | TOKENFLAGS;\
 	ptok->tok.len = p - tokbegin; \
 	ptok->tok.data = p_strndup(pool, tokbegin, p-tokbegin); \
 	l_pushback(toklist, ptok); \
@@ -398,10 +439,19 @@ static int cmdline_parse_token(struct cmdline_parser *parser)
 			case '"':  state = PARSE_STATE_DQUOTE;++p;break;
 			case '`':  state = PARSE_STATE_BACKTICK;++p;break;
 			case '[':  state = PARSE_STATE_TEST;++p;break;
-			case '|':  PUSHBACK_TOKEN(1, TOKEN_TYPE_PIPE, 0);break;
-			case '&':
+			case '|':  
+				ENSURE_NOTEND(p[1], CMDLINE_PARSE_CONTINUE);
 				if (p[1] == '&') {
-					PUSHBACK_TOKEN(2, TOKEN_TYPE_DAND, 0);
+					PUSHBACK_TOKEN(2, TOKEN_TYPE_LOGIC_OR, 0);
+				}
+				else {
+					PUSHBACK_TOKEN(1, TOKEN_TYPE_PIPE, 0);
+				}
+				break;
+			case '&':
+				ENSURE_NOTEND(p[1], CMDLINE_PARSE_CONTINUE);
+				if (p[1] == '&') {
+					PUSHBACK_TOKEN(2, TOKEN_TYPE_LOGIC_AND, 0);
 				}
 				else {
 					PUSHBACK_TOKEN(1, TOKEN_TYPE_AND, 0);
