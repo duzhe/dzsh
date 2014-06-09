@@ -159,7 +159,7 @@ int do_redirect(struct list *redirections)
 
 
 /*
-void dbgout(struct process_startup_info *info)
+void dbgout(struct command *info)
 {
 	int pid;
 	int ppid;
@@ -259,7 +259,7 @@ static const char *getbinpathname(struct mempool *pool, struct cstr *bin, struct
 static BOOL check(struct mempool *pool, struct list *infos) 
 {
 	struct lnode *infonode;
-	struct process_startup_info *info;
+	struct command *info;
 	struct cstr *bin;
 	const char *binfullpath;
 	BOOL all_ok;
@@ -287,14 +287,14 @@ static BOOL check(struct mempool *pool, struct list *infos)
 }
 
 
-int execute(struct mempool *pool, struct list *process_startup_infos)
+int execute_cmdline(struct mempool *pool, struct list *cmdline)
 {
 	int fdin, fdout;
 	struct list *sonpids;
 	struct lnode *infonode;
 	struct lnode *paramsnode;
 	struct lnode *pidnode;
-	struct process_startup_info *info;
+	struct command *info;
 	int pipefd[2];
 	int paramscount;
 	char **params;
@@ -312,7 +312,7 @@ int execute(struct mempool *pool, struct list *process_startup_infos)
 	 * 2. fork  child process exec into specified command
 	 *          parent save child pid and go to next iteration
 	 * */
-	for (infonode = process_startup_infos->first; infonode != NULL; 
+	for (infonode = cmdline->first; infonode != NULL; 
 			infonode = infonode->next) {
 		/* prepare pipes */
 		/* pipefd[1] is for write , using it as STDOUT at the previous 
@@ -382,7 +382,7 @@ int execute(struct mempool *pool, struct list *process_startup_infos)
 #ifdef PRINT_STARTUP_INFO_ONLY
 void print_startup_infos(struct list *infos)
 {
-	struct process_startup_info *info;
+	struct command *info;
 	struct lnode *infonode;
 	struct cstr *param;
 	struct lnode *paramnode;
@@ -455,7 +455,7 @@ int main(int argc, char **argv)
 	int retval;
 	FILE *instream;
 	struct list *cmdlist;
-	struct list *process_startup_infos;
+	struct list *cmdline;
 	struct mempool *pool;
 	struct cmdline_parser *parser;
 	struct lnode *node;
@@ -564,14 +564,14 @@ int main(int argc, char **argv)
 		}
 
 		for (node = cmdlist->first; node != NULL; node = node->next) {
-			process_startup_infos = node->data;
-			if (!check(pool, process_startup_infos)){
+			cmdline = node->data;
+			if (!check(pool, cmdline)){
 				continue;
 			}
 #ifdef PRINT_STARTUP_INFO_ONLY
-			print_startup_infos(process_startup_infos);
+			print_startup_infos(cmdline);
 #else
-			execute(pool, process_startup_infos);
+			execute_cmdline(pool, cmdline);
 #endif
 		}
 	}

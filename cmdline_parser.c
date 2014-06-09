@@ -56,7 +56,7 @@ struct cmdline_parser
 	int phase;
 	int state;
 	const char *p;
-	struct process_startup_info *info;
+	struct command *info;
 	struct list *toklist;
 	const char *errmsg;
 };
@@ -174,10 +174,10 @@ struct token *create_tok(struct mempool *pool, unsigned int type,
 */
 
 
-struct process_startup_info *create_startup_info(struct mempool *pool)
+struct command *create_command(struct mempool *pool)
 {
-	struct process_startup_info *info;
-	info = p_alloc(pool, sizeof(struct process_startup_info));
+	struct command *info;
+	info = p_alloc(pool, sizeof(struct command));
 	info->params = l_create(pool);
 	info->redirections = l_create(pool);
 	info->bin = NULL;
@@ -202,7 +202,7 @@ struct cmdline_parser *create_cmdline_parser(struct mempool *pool,
 	return parser;
 }
 
-BOOL startupinfo_empty(struct process_startup_info *info)
+BOOL startupinfo_empty(struct command *info)
 {
 	return l_empty(info->params) && l_empty(info->redirections);
 }
@@ -594,8 +594,8 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 	struct lnode *node;
 	struct token *token;
 	struct list *cmdlist;
-	struct list *infos;
-	struct process_startup_info *info;
+	struct list *cmdline;
+	struct command *cmd;
 	struct redirection *re;
 	int retval;
 	int redirect_file;
@@ -605,8 +605,8 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 	if (cmdlist == NULL) {
 		cmdlist = l_create(pool);
 	}
-	infos = l_create(pool);
-	info = create_startup_info(pool);
+	cmdline = l_create(pool);
+	cmd = create_command(pool);
 	redirect_file =0;
 	re = NULL;
 	for (node = parser->toklist->first; node != NULL; node = node->next) {
@@ -632,11 +632,11 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 		switch (token->type) {
 		case TOKEN_TYPE_NORMAL:
 			if (token->flags & (TOKEN_FLAGS_DQUOTED | TOKEN_FLAGS_SQUOTED)) {
-				l_pushback(info->params, make_cstr(pool, token->tok.data+1,
+				l_pushback(cmd->params, make_cstr(pool, token->tok.data+1,
 							token->tok.len-2));
 			}
 			else {
-				l_pushback(info->params, &(token->tok));
+				l_pushback(cmd->params, &(token->tok));
 			}
 			break;
 		case TOKEN_TYPE_REDIRECT:
@@ -648,34 +648,34 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 			if (re->flags & REDIRECT_FILE) {
 				redirect_file = 1;
 			}
-			l_pushback(info->redirections, re);
+			l_pushback(cmd->redirections, re);
 			break;
 		case TOKEN_TYPE_ENDLINE:
 		case TOKEN_TYPE_SIMICOLON:
-			if (!startupinfo_empty(info)) {
-				l_pushback(infos, info);
-				info = create_startup_info(pool);
+			if (!startupinfo_empty(cmd)) {
+				l_pushback(cmdline, cmd);
+				cmd = create_command(pool);
 			}
-			if (!l_empty(infos)) {
-				l_pushback(cmdlist, infos);
-				infos = l_create(pool);
+			if (!l_empty(cmdline)) {
+				l_pushback(cmdlist, cmdline);
+				cmdline = l_create(pool);
 			}
 			break;
 		case TOKEN_TYPE_PIPE:
-			if (startupinfo_empty(info)) {
+			if (startupinfo_empty(cmd)) {
 				parser->errmsg = "invalid syntax";
 				return CMDLINE_PARSE_SYNTAX_ERROR;
 			}
 			else {
-				l_pushback(infos, info);
-				info = create_startup_info(pool);
+				l_pushback(cmdline, cmd);
+				cmd = create_command(pool);
 			}
 			break;
 		case TOKEN_TYPE_COMMENT:
 			break;
 		default:
-			l_pushback(infos, info);
-			info = create_startup_info(pool);
+			l_pushback(cmdline, cmd);
+			cmd = create_command(pool);
 			break;
 		}
 	}

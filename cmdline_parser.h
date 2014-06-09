@@ -49,15 +49,15 @@ struct redirection{
 	union redirection_side right;
 };
 
-struct process_startup_info {
+struct command {
 	struct list *params;
 	struct list *redirections;
 	const char *bin;
 };
 
-BOOL startupinfo_empty(struct process_startup_info *);
+BOOL startupinfo_empty(struct command *);
 
-struct process_startup_info *create_startup_info(struct mempool *pool);
+struct command *create_command(struct mempool *pool);
 
 struct cmdline_parser;
 struct cmdline_parser *create_cmdline_parser(struct mempool *pool, 
