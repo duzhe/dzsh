@@ -447,7 +447,7 @@ int main(int argc, char **argv)
 		p_clear(pool);
 		cmdline_buf_clear(&buf);
 		cmdlist = l_create(pool);
-		parser = create_parser(pool,  cmdlist, &buf, env);
+		parser = create_parser(pool, cmdlist, &buf, env);
 
 		/* read commandline and parse */
 		if (interactive) {
@@ -471,7 +471,7 @@ int main(int argc, char **argv)
 				break;
 			}
 
-			retval = cmdline_parse(parser);
+			retval = parser_parse(parser);
 			if (retval != CMDLINE_PARSE_CONTINUE) {
 				break;
 			}
