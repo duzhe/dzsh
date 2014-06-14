@@ -62,7 +62,7 @@ struct cmdline_parser
 };
 
 typedef int (*cmdline_parse_phase_func)(struct cmdline_parser *);
-static int cmdline_parse_token(struct cmdline_parser *parser);
+static int cmdline_parse_rawtoken(struct cmdline_parser *parser);
 static int cmdline_ensure_cmdline_end(struct cmdline_parser *parser);
 static int cmdline_parse_classication(struct cmdline_parser *parser);
 #ifdef DEBUG
@@ -72,7 +72,7 @@ static int cmdline_parse_end(struct cmdline_parser *parser);
 #endif
 
 static cmdline_parse_phase_func phase_func[] = {
-	&cmdline_parse_token,
+	&cmdline_parse_rawtoken,
 #ifdef DEBUG
 	&cmdline_parse_token_print,
 #endif
@@ -381,7 +381,7 @@ int cmdline_parse(struct cmdline_parser *parser)
 }
 
 
-static int cmdline_parse_token(struct cmdline_parser *parser)
+static int cmdline_parse_rawtoken(struct cmdline_parser *parser)
 {
 	int retval;
 	struct mempool *pool;
