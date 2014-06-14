@@ -34,16 +34,14 @@ const char *getfullpathname(struct mempool *pool, struct cstr *name)
 }
 
 
-int do_redirect(struct list *redirections)
+int do_redirect(struct mempool *pool, struct list *redirections)
 {
-	struct mempool *pool;
 	struct redirection *p;
 	int retval;
 	const char *filename;
 	struct lnode *node;
 	int rightfd;
 	const char *openfor;
-	pool = p_create(8196);
 	for (node = redirections->first; node != NULL; node = node->next) {
 		p = node->data;
 		if (p->flags & REDIRECT_FILE) {
@@ -104,7 +102,8 @@ void dbgout(struct command *cmd)
 */
 
 
-static int redirect_and_exec(const char *bin, char **params, struct list *redirections, int fdin, int fdout)
+static int redirect_and_exec(struct mempool *pool, const char *bin, char **params,
+		struct list *redirections, int fdin, int fdout)
 {
 	int retval;
 	if (fdin != STDIN_FILENO) {
@@ -121,20 +120,31 @@ static int redirect_and_exec(const char *bin, char **params, struct list *redire
 		dup2(fdout, STDOUT_FILENO);
 		close(fdout);
 	}
-	if (do_redirect(redirections) == -1) {
+	if (do_redirect(pool, redirections) == -1) {
 		return -1;
 	}
 	if (bin != NULL) {
 		retval = execv(bin, params);
 		if (retval == -1) {
-			return 1;
+			fprintf(stderr, "errno: %d\n", errno);
+			switch(errno) {
+			case EACCES:
+				fprintf(stderr, "%s: %s: Permission denied\n", env->argv[0],
+						params[0]);
+				return 126;
+			default:
+				fprintf(stderr, "%s: %s Other Error\n", env->argv[0],
+						params[0]);
+				return 127;
+			}
 		}
 	}
 	return 0; 
 }
 
 
-static const char *getbinpathname(struct mempool *pool, struct cstr *bin, struct list *pathentry)
+static const char *getbinpathname(struct mempool *pool, struct cstr *bin,
+		struct list *pathentry)
 {
 	struct lnode *node;
 	size_t len;
@@ -187,34 +197,22 @@ static const char *getbinpathname(struct mempool *pool, struct cstr *bin, struct
 }
 
 
-static BOOL check(struct mempool *pool, struct list *cmdline) 
+static int search_bin(struct mempool *pool, struct command *cmd)
 {
-	struct lnode *cmdnode;
-	struct command *cmd;
 	struct cstr *bin;
 	const char *binfullpath;
-	BOOL all_ok;
-	/* check commandline */
-	all_ok = TRUE;
-	for (cmdnode = cmdline->first; cmdnode!=NULL; cmdnode=cmdnode->next) {
-		if (cmdnode == NULL) {
-			continue;
-		}
-		cmd = cmdnode->data;
-		if (cmd->params->first != NULL) {
-			bin = cmd->params->first->data;
-			binfullpath = getbinpathname(pool, bin, env->pathentry);
-			if (binfullpath == NULL) {
-				all_ok = FALSE;
-				break;
-			}
-		}
-		else {
-			binfullpath = NULL;
+	cmd->bin = NULL;
+	if (cmd->params->first != NULL) {
+		bin = cmd->params->first->data;
+		binfullpath = getbinpathname(pool, bin, env->pathentry);
+		if (binfullpath == NULL) {
+			fprintf(stderr, "%s: %s: command not found\n", env->argv[0],
+					bin->data);
+			return 127;
 		}
 		cmd->bin = binfullpath;
 	}
-	return all_ok;
+	return 0;
 }
 
 
@@ -283,7 +281,16 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 			break;
 		}
 		if (pid == 0) {
-			retval = redirect_and_exec(cmd->bin, params, cmd->redirections, fdin, fdout);
+			/* create a new mempool to avoid COW */
+			pool = p_create(8196);
+			retval = search_bin(pool, cmd);
+			if (retval != 0) {
+				p_destroy(pool);
+				exit(retval);
+			}
+			/* on success, redirect and exec will not return */
+			retval = redirect_and_exec(pool, cmd->bin, params, cmd->redirections, fdin, fdout);
+			p_destroy(pool);
 			exit(retval);
 		}
 		/* save son process pid */
@@ -432,9 +439,8 @@ int main(int argc, char **argv)
 	/* 1. initialize 
 	 * 2. read commandline 
 	 * 3. parse commandline
-	 * 4. check commanline
-	 * 5. fork and execute
-	 * 6. wait all childs
+	 * 4. fork and execute
+	 * 5. wait all childs
 	 */
 	for (;;) {
 		/* clear and reinit */
@@ -496,9 +502,6 @@ int main(int argc, char **argv)
 
 		for (node = cmdlist->first; node != NULL; node = node->next) {
 			cmdline = node->data;
-			if (!check(pool, cmdline)){
-				continue;
-			}
 #ifdef PRINT_STARTUP_INFO_ONLY
 			print_cmdline(cmdline);
 #else
