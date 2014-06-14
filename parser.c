@@ -203,7 +203,7 @@ struct parser *create_parser(struct mempool *pool,
 	return parser;
 }
 
-BOOL startupinfo_empty(struct command *info)
+BOOL command_empty(struct command *info)
 {
 	return l_empty(info->params) && l_empty(info->redirections);
 }
@@ -653,7 +653,7 @@ static int cmdline_parse_classication(struct parser *parser)
 			break;
 		case TOKEN_TYPE_ENDLINE:
 		case TOKEN_TYPE_SIMICOLON:
-			if (!startupinfo_empty(cmd)) {
+			if (!command_empty(cmd)) {
 				l_pushback(cmdline, cmd);
 				cmd = create_command(pool);
 			}
@@ -663,7 +663,7 @@ static int cmdline_parse_classication(struct parser *parser)
 			}
 			break;
 		case TOKEN_TYPE_PIPE:
-			if (startupinfo_empty(cmd)) {
+			if (command_empty(cmd)) {
 				parser->errmsg = "invalid syntax";
 				return CMDLINE_PARSE_SYNTAX_ERROR;
 			}
