@@ -11,7 +11,7 @@ struct str;
 struct env;
 
 #define REDIRECT_IN (0x01)
-#define REDIRECT_FILE (0x02)
+#define REDIRECT_OUT (0x02)
 #define REDIRECT_APPEND (0x04)
 
 union redirect_from {

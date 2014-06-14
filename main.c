@@ -44,7 +44,7 @@ int do_redirect(struct mempool *pool, struct list *redirections)
 	const char *openfor;
 	for (node = redirections->first; node != NULL; node = node->next) {
 		p = node->data;
-		if (p->flags & REDIRECT_FILE) {
+		if (p->flags & REDIRECT_OUT) {
 			filename = getfullpathname(pool, p->right.pathname);
 			if (p->flags & REDIRECT_IN) {
 				rightfd = open(filename,  O_RDONLY);
@@ -73,7 +73,7 @@ int do_redirect(struct mempool *pool, struct list *redirections)
 		}
 
 		retval = dup2(rightfd, p->leftfd);
-		if (p->flags & REDIRECT_FILE) {
+		if (p->flags & REDIRECT_OUT) {
 			close(rightfd);
 		}
 

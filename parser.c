@@ -359,7 +359,7 @@ int cmdline_parse_redirection(struct parser *parser, struct str *token,
 		re->right.fd = s_atoi(&t);
 	}
 	else {
-		re->flags |= REDIRECT_FILE;
+		re->flags |= REDIRECT_OUT;
 	}
 	return CMDLINE_PARSE_OK;
 }
@@ -646,7 +646,7 @@ static int cmdline_parse_classication(struct parser *parser)
 			if (retval != CMDLINE_PARSE_OK) {
 				return retval;
 			}
-			if (re->flags & REDIRECT_FILE) {
+			if (re->flags & REDIRECT_OUT) {
 				redirect_file = 1;
 			}
 			l_pushback(cmd->redirections, re);
