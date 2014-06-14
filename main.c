@@ -90,21 +90,21 @@ int do_redirect(struct list *redirections)
 
 
 /*
-void dbgout(struct command *info)
+void dbgout(struct command *cmd)
 {
 	int pid;
 	int ppid;
 	struct cstr *bin;
 	pid = getpid();
 	ppid = getppid();
-	bin = info->params->first->data;
+	bin = cmd->params->first->data;
 	fprintf(stderr, "process start: pid: %d,  ppid: %d, bin:%s\n",
 			pid, ppid, bin);
 }
 */
 
 
-static int subprocess_exec(const char *bin, char **params, struct list *redirections, int fdin, int fdout)
+static int redirect_and_exec(const char *bin, char **params, struct list *redirections, int fdin, int fdout)
 {
 	int retval;
 	if (fdin != STDIN_FILENO) {
@@ -187,22 +187,22 @@ static const char *getbinpathname(struct mempool *pool, struct cstr *bin, struct
 }
 
 
-static BOOL check(struct mempool *pool, struct list *infos) 
+static BOOL check(struct mempool *pool, struct list *cmdline) 
 {
-	struct lnode *infonode;
-	struct command *info;
+	struct lnode *cmdnode;
+	struct command *cmd;
 	struct cstr *bin;
 	const char *binfullpath;
 	BOOL all_ok;
 	/* check commandline */
 	all_ok = TRUE;
-	for (infonode = infos->first; infonode!=NULL; infonode=infonode->next) {
-		if (infonode == NULL) {
+	for (cmdnode = cmdline->first; cmdnode!=NULL; cmdnode=cmdnode->next) {
+		if (cmdnode == NULL) {
 			continue;
 		}
-		info = infonode->data;
-		if (info->params->first != NULL) {
-			bin = info->params->first->data;
+		cmd = cmdnode->data;
+		if (cmd->params->first != NULL) {
+			bin = cmd->params->first->data;
 			binfullpath = getbinpathname(pool, bin, env->pathentry);
 			if (binfullpath == NULL) {
 				all_ok = FALSE;
@@ -212,7 +212,7 @@ static BOOL check(struct mempool *pool, struct list *infos)
 		else {
 			binfullpath = NULL;
 		}
-		info->bin = binfullpath;
+		cmd->bin = binfullpath;
 	}
 	return all_ok;
 }
@@ -222,10 +222,10 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 {
 	int fdin, fdout;
 	struct list *sonpids;
-	struct lnode *infonode;
+	struct lnode *cmdnode;
 	struct lnode *paramsnode;
 	struct lnode *pidnode;
-	struct command *info;
+	struct command *cmd;
 	int pipefd[2];
 	int paramscount;
 	char **params;
@@ -239,12 +239,12 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 	fdout = STDOUT_FILENO;
 	sonpids = l_create(pool);
 	/* each iteration produce a subprocess */
-	/* 1. prepare startup info and pipefds 
+	/* 1. prepare startup cmd and pipefds 
 	 * 2. fork  child process exec into specified command
 	 *          parent save child pid and go to next iteration
 	 * */
-	for (infonode = cmdline->first; infonode != NULL; 
-			infonode = infonode->next) {
+	for (cmdnode = cmdline->first; cmdnode != NULL; 
+			cmdnode = cmdnode->next) {
 		/* prepare pipes */
 		/* pipefd[1] is for write , using it as STDOUT at the previous 
 		 * process (on the left side of '|' sign), pipefd[0] is for read, 
@@ -253,8 +253,8 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 		 * first process, using STDIN as STDIN.
 		 * the last process , using STDOUT as STDOUT.
 		 */
-		info = infonode->data;
-		if (infonode->next != NULL) {
+		cmd = cmdnode->data;
+		if (cmdnode->next != NULL) {
 			retval = pipe(pipefd);
 			if (retval == -1) {
 				fprintf(stderr, "%s: fail create pipe: %s\n", env->argv[0], 
@@ -267,10 +267,10 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 		}
 
 		/* get an array form 'params' */
-		paramscount = l_count(info->params);
+		paramscount = l_count(cmd->params);
 		params = p_alloc(pool, sizeof(char*) *(paramscount+1));
 		i = 0;
-		for (paramsnode = info->params->first; paramsnode != NULL;
+		for (paramsnode = cmd->params->first; paramsnode != NULL;
 				paramsnode = paramsnode->next) {
 			params[i++] = p_cstrdup(pool, paramsnode->data);
 		}
@@ -283,7 +283,7 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 			break;
 		}
 		if (pid == 0) {
-			retval = subprocess_exec(info->bin, params, info->redirections, fdin, fdout);
+			retval = redirect_and_exec(cmd->bin, params, cmd->redirections, fdin, fdout);
 			exit(retval);
 		}
 		/* save son process pid */
@@ -311,23 +311,23 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 
 
 #ifdef PRINT_STARTUP_INFO_ONLY
-void print_startup_infos(struct list *infos)
+void print_cmdline(struct list *cmdline)
 {
-	struct command *info;
-	struct lnode *infonode;
+	struct command *cmd;
+	struct lnode *cmdnode;
 	struct cstr *param;
 	struct lnode *paramnode;
 	struct redirection *re;
 	struct lnode *renode;
 	
-	for (infonode = infos->first; infonode != NULL; infonode = infonode->next) {
-		info = infonode->data;
-		for (paramnode = info->params->first; paramnode != NULL; paramnode = paramnode->next) {
+	for (cmdnode = cmdline->first; cmdnode != NULL; cmdnode = cmdnode->next) {
+		cmd = cmdnode->data;
+		for (paramnode = cmd->params->first; paramnode != NULL; paramnode = paramnode->next) {
 			param = paramnode->data;
 			cstr_print(param, stdout);
 			fputc(' ', stdout);
 		}
-		for (renode = info->redirections->first; renode != NULL; renode = renode->next) {
+		for (renode = cmd->redirections->first; renode != NULL; renode = renode->next) {
 			re = renode->data;
 			switch (re->flags) {
 				case 0:
@@ -356,7 +356,7 @@ void print_startup_infos(struct list *infos)
 					break;
 			}
 		}
-		if (infonode->next != NULL) {
+		if (cmdnode->next != NULL) {
 			printf(" | ");
 		}
 	}
@@ -500,7 +500,7 @@ int main(int argc, char **argv)
 				continue;
 			}
 #ifdef PRINT_STARTUP_INFO_ONLY
-			print_startup_infos(cmdline);
+			print_cmdline(cmdline);
 #else
 			execute_cmdline(pool, cmdline);
 #endif
