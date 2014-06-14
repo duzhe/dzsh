@@ -1,7 +1,7 @@
 ver = release
 
 ifeq ($(ver), debug)
-CFLAGS=-g -Wall -DDEBUG -DPRINT_STARTUP_INFO_ONLY -DREADBUFSIZE=16
+CFLAGS=-g -Wall -DDEBUG -DPRINT_COMMAND_ONLY -DREADBUFSIZE=16
 else
 CFLAGS=-g -Wall
 endif

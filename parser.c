@@ -36,7 +36,7 @@ static int isnumeric(const char *p)
 */
 #define PARSE_STATE_BACKSLASH 	0x09
 #define PARSE_STATE_REDIRECT	0x10
-#define PARSE_STATE_ASSIGMENT	0x11
+#define PARSE_STATE_ASSIGNMENT	0x11
 #define PARSE_STATE_TEST		0x12
 #define PARSE_STATE_COMMENT		0x13
 #define PARSE_STATE_JOB			0x14
@@ -86,36 +86,37 @@ static parser_parse_phase_func phase_func[] = {
 };
 
 
-#define TOKEN_TYPE_SIMPLE				0x00
-#define TOKEN_TYPE_NORMAL 				0x01
-#define TOKEN_TYPE_REDIRECT				0x02
-#define TOKEN_TYPE_PIPE					0x03
-#define TOKEN_TYPE_AND					0x03
-#define TOKEN_TYPE_LOGIC_AND			0x04
-#define TOKEN_TYPE_LOGIC_OR				0x0c
-#define TOKEN_TYPE_SIMICOLON			0x05
-#define TOKEN_TYPE_ENDLINE				0x06
-#define TOKEN_TYPE_TERMINATE			0x07
-#define TOKEN_TYPE_COMMENT				0x08
-#define TOKEN_TYPE_TEST					0x09
-#define TOKEN_TYPE_JOB					0x09
-#define TOKEN_TYPE_FUNCNAME				0x0a
-#define TOKEN_TYPE_FUNCBODY				0x0b
-#define TOKEN_TYPE_BACKTICK				0x0e
-#define TOKEN_TYPE_VARIABLE				0x0f
-#define TOKEN_TYPE_SPECIALVAR			0x10
-#define TOKEN_TYPE_SUBCMDLINE			0x12
-#define TOKEN_TYPE_DQUOTED				0x13
-#define TOKEN_TYPE_SQUOTED				0x14
-#define TOKEN_TYPE_BACKSLASH			0x15
+#define TOKEN_TYPE_SIMPLE                0x00
+#define TOKEN_TYPE_NORMAL                0x01
+#define TOKEN_TYPE_REDIRECT              0x02
+#define TOKEN_TYPE_PIPE                  0x03
+#define TOKEN_TYPE_AND                   0x04
+#define TOKEN_TYPE_LOGIC_AND             0x05
+#define TOKEN_TYPE_LOGIC_OR              0x06
+#define TOKEN_TYPE_SIMICOLON             0x07
+#define TOKEN_TYPE_ENDLINE               0x08
+#define TOKEN_TYPE_TERMINATE             0x09
+#define TOKEN_TYPE_COMMENT               0x0a
+#define TOKEN_TYPE_TEST                  0x0b
+#define TOKEN_TYPE_JOB                   0x0c
+#define TOKEN_TYPE_FUNCNAME              0x0d
+#define TOKEN_TYPE_FUNCBODY              0x0f
+#define TOKEN_TYPE_BACKTICK              0x10
+#define TOKEN_TYPE_VARIABLE              0x11
+#define TOKEN_TYPE_SPECIALVAR            0x12
+#define TOKEN_TYPE_SUBCMDLINE            0x13
+#define TOKEN_TYPE_DQUOTED               0x14
+#define TOKEN_TYPE_SQUOTED               0x15
+#define TOKEN_TYPE_BACKSLASH             0x16
 
-#define TOKEN_FLAGS_VARIABLE			0x01
-#define TOKEN_FLAGS_SPECIALVAR			0x02
-#define TOKEN_FLAGS_WILDCARD			0x04
-#define TOKEN_FLAGS_INLINE_SUBPROCESS	0x08
-#define TOKEN_FLAGS_DQUOTED				0x0F
-#define TOKEN_FLAGS_SQUOTED				0x10
-#define TOKEN_FLAGS_BACKSLASH			0x20
+#define TOKEN_FLAGS_VARIABLE             0x01
+#define TOKEN_FLAGS_SPECIALVAR           0x02
+#define TOKEN_FLAGS_WILDCARD             0x04
+#define TOKEN_FLAGS_INLINE_SUBPROCESS    0x08
+#define TOKEN_FLAGS_DQUOTED              0x0F
+#define TOKEN_FLAGS_SQUOTED              0x10
+#define TOKEN_FLAGS_BACKSLASH            0x20
+#define TOKEN_FLAGS_ASSIGNMENT           0x40
 
 struct token {
 	unsigned int type:16;
@@ -495,6 +496,10 @@ static int parser_parse_rawtoken(struct parser *parser)
 				state = PARSE_STATE_FUNCBODY;
 				p+=2;
 				break;
+			case '=':
+				tokenflags |= TOKEN_FLAGS_ASSIGNMENT;
+				p++;
+				break;
 			case '>':
 			case '<':
 				ttok.data = tokbegin;
@@ -575,15 +580,16 @@ static int parser_ensure_cmdline_end(struct parser *parser)
 
 static int parser_parse_classication(struct parser *parser)
 {
-	struct mempool *pool;
-	struct lnode *node;
-	struct token *token;
-	struct list *cmdlist;
-	struct list *cmdline;
-	struct command *cmd;
-	struct redirection *re;
-	int retval;
-	int redirect_file;
+	struct mempool      *pool;
+	struct lnode        *node;
+	struct token        *token;
+	struct list         *cmdlist;
+	struct list         *cmdline;
+	struct command      *cmd;
+	struct redirection  *re;
+	int                  retval;
+	BOOL                 redirect_file;
+	BOOL                 parsingenv;
 	
 	pool = parser->pool;
 	cmdlist = parser->cmdlist;
@@ -592,8 +598,11 @@ static int parser_parse_classication(struct parser *parser)
 	}
 	cmdline = l_create(pool);
 	cmd = create_command(pool);
-	redirect_file =0;
 	re = NULL;
+	redirect_file = FALSE;
+	parsingenv = TRUE;
+
+
 	for (node = parser->toklist->first; node != NULL; node = node->next) {
 		token = node->data;
 		if (redirect_file) {
@@ -611,11 +620,21 @@ static int parser_parse_classication(struct parser *parser)
 				parser->errmsg = "invalid syntax";
 				return CMDLINE_PARSE_SYNTAX_ERROR;
 			}
-			redirect_file = 0;
+			redirect_file = FALSE;
 			continue;
 		}
 		switch (token->type) {
 		case TOKEN_TYPE_NORMAL:
+			if (parsingenv) {
+				if (token->flags & TOKEN_FLAGS_ASSIGNMENT && !(token->flags &
+						(TOKEN_FLAGS_DQUOTED | TOKEN_FLAGS_SQUOTED))) {
+					l_pushback(cmd->envp, &(token->tok));
+					break;
+				}
+				else {
+					parsingenv = FALSE;
+				}
+			}
 			if (token->flags & (TOKEN_FLAGS_DQUOTED | TOKEN_FLAGS_SQUOTED)) {
 				l_pushback(cmd->params, s_make(pool, token->tok.data+1,
 							token->tok.len-2));
@@ -631,13 +650,14 @@ static int parser_parse_classication(struct parser *parser)
 				return retval;
 			}
 			if (re->flags & REDIRECT_OUT) {
-				redirect_file = 1;
+				redirect_file = TRUE;
 			}
 			l_pushback(cmd->redirections, re);
 			break;
 		case TOKEN_TYPE_ENDLINE:
 		case TOKEN_TYPE_SIMICOLON:
 			if (!command_empty(cmd)) {
+				cmd->sep = CMD_SEPARATOR_END;
 				l_pushback(cmdline, cmd);
 				cmd = create_command(pool);
 			}
@@ -652,13 +672,21 @@ static int parser_parse_classication(struct parser *parser)
 				return CMDLINE_PARSE_SYNTAX_ERROR;
 			}
 			else {
+				cmd->sep = CMD_SEPARATOR_PIPE;
 				l_pushback(cmdline, cmd);
 				cmd = create_command(pool);
 			}
 			break;
 		case TOKEN_TYPE_COMMENT:
 			break;
+		case TOKEN_TYPE_LOGIC_AND:
+			/*TODO*/
+		case TOKEN_TYPE_LOGIC_OR:
+			/*TODO*/
+		case TOKEN_TYPE_AND:
+			/*TODO*/
 		default:
+			cmd->sep = CMD_SEPARATOR_END;
 			l_pushback(cmdline, cmd);
 			cmd = create_command(pool);
 			break;

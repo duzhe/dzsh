@@ -6,6 +6,7 @@ struct command *create_command(struct mempool *pool)
 {
 	struct command *cmd;
 	cmd = p_alloc(pool, sizeof(struct command));
+	cmd->envp = l_create(pool);
 	cmd->params = l_create(pool);
 	cmd->redirections = l_create(pool);
 	cmd->bin = NULL;

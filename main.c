@@ -103,7 +103,7 @@ void dbgout(struct command *cmd)
 
 
 static int redirect_and_exec(struct mempool *pool, const char *bin, char **params,
-		struct list *redirections, int fdin, int fdout)
+		char **envp, struct list *redirections, int fdin, int fdout)
 {
 	int retval;
 	if (fdin != STDIN_FILENO) {
@@ -124,7 +124,7 @@ static int redirect_and_exec(struct mempool *pool, const char *bin, char **param
 		return -1;
 	}
 	if (bin != NULL) {
-		retval = execv(bin, params);
+		retval = execve(bin, params, envp);
 		if (retval == -1) {
 			fprintf(stderr, "errno: %d\n", errno);
 			switch(errno) {
@@ -227,6 +227,7 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 	int pipefd[2];
 	int paramscount;
 	char **params;
+	char **envp;
 	int i;
 	int childstatus;
 	pid_t pid;
@@ -274,6 +275,21 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 		}
 		params[i] = NULL;
 
+		/* gen an array form envp if envp is not empty */
+		paramscount = l_count(cmd->envp);
+		if (paramscount != 0) {
+			envp = p_alloc(pool, sizeof(char*) *(paramscount+1));
+			i = 0;
+			for (paramsnode = cmd->envp->first; paramsnode != NULL;
+					paramsnode = paramsnode->next) {
+				envp[i++] = p_sdup(pool, paramsnode->data);
+			}
+			envp[i] = NULL;
+		}
+		else {
+			envp = NULL;
+		}
+
 		/* fork and execute */
 		pid = fork();
 		if (pid == -1) {
@@ -289,7 +305,8 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 				exit(retval);
 			}
 			/* on success, redirect and exec will not return */
-			retval = redirect_and_exec(pool, cmd->bin, params, cmd->redirections, fdin, fdout);
+			retval = redirect_and_exec(pool, cmd->bin, params, envp,
+					cmd->redirections, fdin, fdout);
 			p_destroy(pool);
 			exit(retval);
 		}
@@ -317,25 +334,29 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 }
 
 
-#ifdef PRINT_STARTUP_INFO_ONLY
+#ifdef PRINT_COMMAND_ONLY
 void print_cmdline(struct list *cmdline)
 {
 	struct command *cmd;
 	struct lnode *cmdnode;
 	struct str *param;
-	struct lnode *paramnode;
+	struct lnode *node;
 	struct redirection *re;
-	struct lnode *renode;
 	
 	for (cmdnode = cmdline->first; cmdnode != NULL; cmdnode = cmdnode->next) {
 		cmd = cmdnode->data;
-		for (paramnode = cmd->params->first; paramnode != NULL; paramnode = paramnode->next) {
-			param = paramnode->data;
+		for (node = cmd->envp->first; node != NULL; node = node->next) {
+			param = node->data;
 			s_print(param, stdout);
 			fputc(' ', stdout);
 		}
-		for (renode = cmd->redirections->first; renode != NULL; renode = renode->next) {
-			re = renode->data;
+		for (node = cmd->params->first; node != NULL; node = node->next) {
+			param = node->data;
+			s_print(param, stdout);
+			fputc(' ', stdout);
+		}
+		for (node = cmd->redirections->first; node != NULL; node = node->next) {
+			re = node->data;
 			switch (re->flags) {
 				case 0:
 					printf("fd%d->fd%d ", re->leftfd, re->right.fd);
@@ -504,7 +525,7 @@ int main(int argc, char **argv)
 
 		for (node = cmdlist->first; node != NULL; node = node->next) {
 			cmdline = node->data;
-#ifdef PRINT_STARTUP_INFO_ONLY
+#ifdef PRINT_COMMAND_ONLY
 			print_cmdline(cmdline);
 #else
 			execute_cmdline(pool, cmdline);
