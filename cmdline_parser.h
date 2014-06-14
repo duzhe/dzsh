@@ -7,6 +7,7 @@ struct mempool;
 struct list;
 struct lnode;
 struct cstr;
+struct env;
 
 #define REDIRECT_IN (0x01)
 #define REDIRECT_FILE (0x02)
@@ -62,7 +63,7 @@ struct command *create_command(struct mempool *pool);
 struct cmdline_parser;
 struct cmdline_parser *create_cmdline_parser(struct mempool *pool, 
 		struct list *cmdlist, struct cmdline_buf  *buf,
-		const char *IFS);
+		struct env *env);
 
 #define CMDLINE_PARSE_DONE 0x00
 #define CMDLINE_PARSE_OK 0x01

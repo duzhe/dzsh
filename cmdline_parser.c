@@ -2,11 +2,12 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
+#include <stdio.h>
 #include "cmdline_parser.h"
 #include "mempool.h"
 #include "list.h"
 #include "str.h"
-#include <stdio.h>
+#include "env.h"
 
 /*
 static int isnumeric(const char *p)
@@ -51,7 +52,7 @@ struct cmdline_parser
 	struct mempool *pool;
 	struct list *cmdlist;
 	struct cmdline_buf *cmdlinebuf;
-	const char *IFS;
+	struct env *env;
 
 	int phase;
 	int state;
@@ -187,14 +188,14 @@ struct command *create_command(struct mempool *pool)
 
 struct cmdline_parser *create_cmdline_parser(struct mempool *pool, 
 		struct list *cmdlist, struct cmdline_buf *buf,
-		const char *IFS)
+		struct env *env)
 {
 	struct cmdline_parser *parser;
 	parser = p_alloc(pool, sizeof(struct cmdline_parser));
 	parser->pool = pool;
 	parser->cmdlist = cmdlist;
 	parser->cmdlinebuf = buf;
-	parser->IFS = IFS;
+	parser->env = env;
 	parser->toklist = l_create(pool);
 	parser->phase = PARSE_PHASE_TOKEN;
 	parser->state = PARSE_STATE_BEGIN;
@@ -399,7 +400,7 @@ static int cmdline_parse_rawtoken(struct cmdline_parser *parser)
 	state = parser->state;
 	tokbegin = parser->cmdlinebuf->data;
 	p = parser->p;
-	IFS = parser->IFS;
+	IFS = parser->env->IFS;
 	tokenflags = 0;
 	retval = CMDLINE_PARSE_OK;
 
