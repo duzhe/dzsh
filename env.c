@@ -39,7 +39,7 @@ int initialize_env(struct mempool *pool, int argc, char **argv)
 	pathentry = l_create(pool);
 	tok = strtok(ppathbuf, ":");
 	while (tok != NULL) {
-		l_pushback(pathentry, make_cstr(pool, tok, strlen(tok)));
+		l_pushback(pathentry, s_make(pool, tok, strlen(tok)));
 		tok = strtok(NULL, ":");
 	}
 	env->pathentry = pathentry;
@@ -52,7 +52,7 @@ int initialize_env(struct mempool *pool, int argc, char **argv)
 #else
 	env->maxpath = 4096;
 #endif
-	env->cwd = new_cstr(pool);
+	env->cwd = s_new(pool);
 	env->cwd->data = p_large_alloc(pool, env->maxpath);
 	if (getcwd((char*)env->cwd->data, env->maxpath) == NULL) {
 		fprintf(stderr, "%s: cannot get current working directory: %s", 

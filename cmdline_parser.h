@@ -6,7 +6,7 @@
 struct mempool;
 struct list;
 struct lnode;
-struct cstr;
+struct str;
 struct env;
 
 #define REDIRECT_IN (0x01)
@@ -41,7 +41,7 @@ BOOL cmdline_buf_line_complete(struct cmdline_buf *);
 
 union redirection_side {
 	int fd;
-	struct cstr *pathname;
+	struct str *pathname;
 };
 
 struct redirection{

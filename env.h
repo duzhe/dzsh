@@ -11,7 +11,7 @@ struct env {
 	const char *PATH;
 	struct list *pathentry;
 	long maxpath;
-	struct cstr *cwd;
+	struct str *cwd;
 }*env;
 
 int initialize_env(struct mempool *pool, int argc, char **argv);

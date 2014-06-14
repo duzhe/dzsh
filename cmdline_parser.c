@@ -120,13 +120,13 @@ static cmdline_parse_phase_func phase_func[] = {
 struct token {
 	unsigned int type:16;
 	unsigned int flags:16;
-	struct cstr tok;
+	struct str tok;
 };
 /*
 struct token {
 	unsigned int type;
 	struct {
-		struct cstr tok;
+		struct str tok;
 		struct list* subtok;
 	}
 };
@@ -322,11 +322,11 @@ const char *get_token_end(const char *begin, const char *IFS)
 }
 
 
-int cmdline_parse_redirection(struct cmdline_parser *parser, struct cstr *token, 
+int cmdline_parse_redirection(struct cmdline_parser *parser, struct str *token, 
 		struct redirection *re)
 {
 	const char *p;
-	struct cstr t;
+	struct str t;
 	int leftdeffd;
 	
 	re->flags = 0;
@@ -344,7 +344,7 @@ int cmdline_parse_redirection(struct cmdline_parser *parser, struct cstr *token,
 	else {
 		t.data = token->data;
 		t.len = p - token->data;
-		re->leftfd = cstr_atoi(&t);
+		re->leftfd = s_atoi(&t);
 	}
 	if (*p == '>' && *(p+1) == '>') {
 		re->flags |= REDIRECT_APPEND;
@@ -356,7 +356,7 @@ int cmdline_parse_redirection(struct cmdline_parser *parser, struct cstr *token,
 	if (*p == '&') {
 		t.data = p+1;
 		t.len = token->data + token->len - (p+1);
-		re->right.fd = cstr_atoi(&t);
+		re->right.fd = s_atoi(&t);
 	}
 	else {
 		re->flags |= REDIRECT_FILE;
@@ -393,7 +393,7 @@ static int cmdline_parse_rawtoken(struct cmdline_parser *parser)
 	const char *IFS;
 	int tokenflags;
 	struct token *ptok;
-	struct cstr ttok;
+	struct str ttok;
 	
 	pool = parser->pool;
 	toklist = parser->toklist;
@@ -515,7 +515,7 @@ static int cmdline_parse_rawtoken(struct cmdline_parser *parser)
 			case '<':
 				ttok.data = tokbegin;
 				ttok.len = p - tokbegin;
-				if (p != tokbegin && !cstr_isnumeric(&ttok)) {
+				if (p != tokbegin && !s_isnumeric(&ttok)) {
 					PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
 				}
 				state = PARSE_STATE_REDIRECT;
@@ -616,7 +616,7 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 			switch(token->type) {
 			case TOKEN_TYPE_NORMAL:
 				if (token->flags & (TOKEN_FLAGS_DQUOTED | TOKEN_FLAGS_SQUOTED)) {
-					re->right.pathname =  make_cstr(pool, token->tok.data+1, 
+					re->right.pathname =  s_make(pool, token->tok.data+1, 
 							token->tok.len-2);
 				}
 				else {
@@ -633,7 +633,7 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 		switch (token->type) {
 		case TOKEN_TYPE_NORMAL:
 			if (token->flags & (TOKEN_FLAGS_DQUOTED | TOKEN_FLAGS_SQUOTED)) {
-				l_pushback(cmd->params, make_cstr(pool, token->tok.data+1,
+				l_pushback(cmd->params, s_make(pool, token->tok.data+1,
 							token->tok.len-2));
 			}
 			else {
@@ -705,7 +705,7 @@ static int cmdline_parse_token_print(struct cmdline_parser *parser)
 			printf("\\n");
 		}
 		else {
-			cstr_print(&tok->tok, stdout);
+			s_print(&tok->tok, stdout);
 		}
 		printf("\n");
 	}

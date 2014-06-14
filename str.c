@@ -5,22 +5,22 @@
 #include "str.h"
 
 
-struct cstr *new_cstr(struct mempool *pool)
+struct str *s_new(struct mempool *pool)
 {
-	struct cstr *str;
-	str = p_alloc(pool, sizeof(struct cstr));
+	struct str *str;
+	str = p_alloc(pool, sizeof(struct str));
 	str->len = 0;
 	str->data = NULL;
 	return str;
 }
 
 
-struct cstr *dup_cstr(struct mempool *pool, const char *c_str)
+struct str *dup_cstr(struct mempool *pool, const char *c_str)
 {
-	struct cstr *str;
+	struct str *str;
 	char *data;
 	int len;
-	str = p_alloc(pool, sizeof(struct cstr));
+	str = p_alloc(pool, sizeof(struct str));
 	len = strlen(c_str);
 	data = p_alloc(pool, len);
 	memcpy(data, c_str, len);
@@ -30,17 +30,17 @@ struct cstr *dup_cstr(struct mempool *pool, const char *c_str)
 }
 
 
-struct cstr *make_cstr(struct mempool *pool, const char *data, size_t len)
+struct str *s_make(struct mempool *pool, const char *data, size_t len)
 {
-	struct cstr *str;
-	str = p_alloc(pool, sizeof(struct cstr));
+	struct str *str;
+	str = p_alloc(pool, sizeof(struct str));
 	str->len = len;
 	str->data = data;
 	return str;
 }
 
 
-int cstr_empty(struct cstr *str)
+BOOL s_empty(struct str *str)
 {
 	if (str != NULL && str->data != NULL && str->len != 0) {
 		return 0;
@@ -49,7 +49,7 @@ int cstr_empty(struct cstr *str)
 }
 
 
-int cstr_isnumeric(struct cstr *str)
+int s_isnumeric(struct str *str)
 {
 	int i;
 	const char *p;
@@ -63,7 +63,7 @@ int cstr_isnumeric(struct cstr *str)
 }
 
 
-int cstr_atoi(struct cstr *str)
+int s_atoi(struct str *str)
 {
 	int result;
 	int isnegative; 
@@ -95,7 +95,7 @@ int cstr_atoi(struct cstr *str)
 }
 
 
-int cstrcmp(struct cstr *l, struct cstr *r)
+int cstrcmp(struct str *l, struct str *r)
 {
 	int minlength;
 	int result;
@@ -113,7 +113,7 @@ int cstrcmp(struct cstr *l, struct cstr *r)
 }
 
 
-char *p_cstrdup(struct mempool *pool, struct cstr *str)
+char *p_sdup(struct mempool *pool, struct str *str)
 {
 	char *p;
 	p = p_alloc(pool, str->len+1);
@@ -123,7 +123,7 @@ char *p_cstrdup(struct mempool *pool, struct cstr *str)
 }
 
 
-int cstr_print(struct cstr *str, void *_stream)
+int s_print(struct str *str, void *_stream)
 {
 	int i;
 	const char *p;

@@ -16,13 +16,13 @@
 #include "env.h"
 
 
-const char *getfullpathname(struct mempool *pool, struct cstr *name)
+const char *getfullpathname(struct mempool *pool, struct str *name)
 {
-	struct cstr *cwd;
+	struct str *cwd;
 	char *pathname;
 	int len;
 	if (*(name->data) == '/') {
-		return p_cstrdup(pool, name);
+		return p_sdup(pool, name);
 	}
 	cwd = env->cwd;
 	len = cwd->len + 1 + name->len;
@@ -63,7 +63,7 @@ int do_redirect(struct mempool *pool, struct list *redirections)
 			}
 			if (rightfd == -1) {
 				fprintf(stderr, "%s: cannot open file ", env->argv[0]);
-				cstr_print(p->right.pathname, stderr);
+				s_print(p->right.pathname, stderr);
 				fprintf(stderr, " for %s: %s\n", openfor, strerror(errno));
 				return -1;
 			}
@@ -92,7 +92,7 @@ void dbgout(struct command *cmd)
 {
 	int pid;
 	int ppid;
-	struct cstr *bin;
+	struct str *bin;
 	pid = getpid();
 	ppid = getppid();
 	bin = cmd->params->first->data;
@@ -143,16 +143,16 @@ static int redirect_and_exec(struct mempool *pool, const char *bin, char **param
 }
 
 
-static const char *getbinpathname(struct mempool *pool, struct cstr *bin,
+static const char *getbinpathname(struct mempool *pool, struct str *bin,
 		struct list *pathentry)
 {
 	struct lnode *node;
 	size_t len;
 	char *pathname;
-	struct cstr *binpath;
+	struct str *binpath;
 	struct stat statbuf;
 	int retval;
-	if (cstr_empty(bin)) {
+	if (s_empty(bin)) {
 		return NULL;
 	}
 	switch(*(bin->data)) {
@@ -199,7 +199,7 @@ static const char *getbinpathname(struct mempool *pool, struct cstr *bin,
 
 static int search_bin(struct mempool *pool, struct command *cmd)
 {
-	struct cstr *bin;
+	struct str *bin;
 	const char *binfullpath;
 	cmd->bin = NULL;
 	if (cmd->params->first != NULL) {
@@ -270,7 +270,7 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 		i = 0;
 		for (paramsnode = cmd->params->first; paramsnode != NULL;
 				paramsnode = paramsnode->next) {
-			params[i++] = p_cstrdup(pool, paramsnode->data);
+			params[i++] = p_sdup(pool, paramsnode->data);
 		}
 		params[i] = NULL;
 
@@ -322,7 +322,7 @@ void print_cmdline(struct list *cmdline)
 {
 	struct command *cmd;
 	struct lnode *cmdnode;
-	struct cstr *param;
+	struct str *param;
 	struct lnode *paramnode;
 	struct redirection *re;
 	struct lnode *renode;
@@ -331,7 +331,7 @@ void print_cmdline(struct list *cmdline)
 		cmd = cmdnode->data;
 		for (paramnode = cmd->params->first; paramnode != NULL; paramnode = paramnode->next) {
 			param = paramnode->data;
-			cstr_print(param, stdout);
+			s_print(param, stdout);
 			fputc(' ', stdout);
 		}
 		for (renode = cmd->redirections->first; renode != NULL; renode = renode->next) {
@@ -345,17 +345,17 @@ void print_cmdline(struct list *cmdline)
 					break;
 				case 2:
 					printf("fd%d->", re->leftfd);
-					cstr_print(re->right.pathname, stdout);
+					s_print(re->right.pathname, stdout);
 					fputc(' ', stdout);
 					break;
 				case 3:
 					printf("fd%d<-", re->leftfd);
-					cstr_print(re->right.pathname, stdout);
+					s_print(re->right.pathname, stdout);
 					fputc(' ', stdout);
 					break;
 				case 6:
 					printf("fd%d->>", re->leftfd);
-					cstr_print(re->right.pathname, stdout);
+					s_print(re->right.pathname, stdout);
 					fputc(' ', stdout);
 					break;
 				default:
