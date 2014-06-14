@@ -15,7 +15,7 @@ struct str *s_new(struct mempool *pool)
 }
 
 
-struct str *dup_cstr(struct mempool *pool, const char *c_str)
+struct str *s_dup(struct mempool *pool, const char *c_str)
 {
 	struct str *str;
 	char *data;
@@ -43,9 +43,9 @@ struct str *s_make(struct mempool *pool, const char *data, size_t len)
 BOOL s_empty(struct str *str)
 {
 	if (str != NULL && str->data != NULL && str->len != 0) {
-		return 0;
+		return FALSE;
 	}
-	return 1;
+	return TRUE;
 }
 
 
@@ -95,7 +95,7 @@ int s_atoi(struct str *str)
 }
 
 
-int cstrcmp(struct str *l, struct str *r)
+int s_cmp(struct str *l, struct str *r)
 {
 	int minlength;
 	int result;
