@@ -1,5 +1,5 @@
-#ifndef _CMDLINE_PARSER_H_INCLUDE
-#define _CMDLINE_PARSER_H_INCLUDE
+#ifndef _PARSER_H_INCLUDE
+#define _PARSER_H_INCLUDE
 #include <stdio.h>
 #include "bool.h"
 
@@ -60,8 +60,8 @@ BOOL startupinfo_empty(struct command *);
 
 struct command *create_command(struct mempool *pool);
 
-struct cmdline_parser;
-struct cmdline_parser *create_cmdline_parser(struct mempool *pool, 
+struct parser;
+struct parser *create_parser(struct mempool *pool, 
 		struct list *cmdlist, struct cmdline_buf  *buf,
 		struct env *env);
 
@@ -75,8 +75,8 @@ struct cmdline_parser *create_cmdline_parser(struct mempool *pool,
 #define CMDLINE_PARSE_TOKEN_TOO_LONG 0x07
 /* OK is an internal state, cmdline_parse will return DONE, CONTINUE
  * or SYNTAX_ERROR ONLY */
-int cmdline_parse(struct cmdline_parser *parser);
-const char *errmsg(struct cmdline_parser *parser);
+int cmdline_parse(struct parser *parser);
+const char *errmsg(struct parser *parser);
 
 
 #endif

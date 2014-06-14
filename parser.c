@@ -3,7 +3,7 @@
 #include <ctype.h>
 #include <string.h>
 #include <stdio.h>
-#include "cmdline_parser.h"
+#include "parser.h"
 #include "mempool.h"
 #include "list.h"
 #include "str.h"
@@ -47,7 +47,7 @@ static int isnumeric(const char *p)
 #define PARSE_PHASE_COUNT   0x02
 
 
-struct cmdline_parser
+struct parser
 {
 	struct mempool *pool;
 	struct list *cmdlist;
@@ -62,14 +62,14 @@ struct cmdline_parser
 	const char *errmsg;
 };
 
-typedef int (*cmdline_parse_phase_func)(struct cmdline_parser *);
-static int cmdline_parse_rawtoken(struct cmdline_parser *parser);
-static int cmdline_ensure_cmdline_end(struct cmdline_parser *parser);
-static int cmdline_parse_classication(struct cmdline_parser *parser);
+typedef int (*cmdline_parse_phase_func)(struct parser *);
+static int cmdline_parse_rawtoken(struct parser *parser);
+static int cmdline_ensure_cmdline_end(struct parser *parser);
+static int cmdline_parse_classication(struct parser *parser);
 #ifdef DEBUG
-static int cmdline_parse_expand(struct cmdline_parser *parser);
-static int cmdline_parse_token_print(struct cmdline_parser *parser);
-static int cmdline_parse_end(struct cmdline_parser *parser);
+static int cmdline_parse_expand(struct parser *parser);
+static int cmdline_parse_token_print(struct parser *parser);
+static int cmdline_parse_end(struct parser *parser);
 #endif
 
 static cmdline_parse_phase_func phase_func[] = {
@@ -186,12 +186,12 @@ struct command *create_command(struct mempool *pool)
 }
 
 
-struct cmdline_parser *create_cmdline_parser(struct mempool *pool, 
+struct parser *create_parser(struct mempool *pool, 
 		struct list *cmdlist, struct cmdline_buf *buf,
 		struct env *env)
 {
-	struct cmdline_parser *parser;
-	parser = p_alloc(pool, sizeof(struct cmdline_parser));
+	struct parser *parser;
+	parser = p_alloc(pool, sizeof(struct parser));
 	parser->pool = pool;
 	parser->cmdlist = cmdlist;
 	parser->cmdlinebuf = buf;
@@ -209,7 +209,7 @@ BOOL startupinfo_empty(struct command *info)
 }
 
 /*
-static char *next_token_begin(struct cmdline_parser *parser, char *p)
+static char *next_token_begin(struct parser *parser, char *p)
 {
 	const char *IFS;
 	IFS = parser->IFS;
@@ -225,7 +225,7 @@ static char *next_token_begin(struct cmdline_parser *parser, char *p)
 
 
 /*
-static const char *next_token_end(struct cmdline_parser *parser, const char *p)
+static const char *next_token_end(struct parser *parser, const char *p)
 {
 	const char *IFS = parser->IFS;
 	while (*p != '\0' && strchr(IFS, *p) != NULL) {
@@ -322,7 +322,7 @@ const char *get_token_end(const char *begin, const char *IFS)
 }
 
 
-int cmdline_parse_redirection(struct cmdline_parser *parser, struct str *token, 
+int cmdline_parse_redirection(struct parser *parser, struct str *token, 
 		struct redirection *re)
 {
 	const char *p;
@@ -365,7 +365,7 @@ int cmdline_parse_redirection(struct cmdline_parser *parser, struct str *token,
 }
 
 
-int cmdline_parse(struct cmdline_parser *parser)
+int cmdline_parse(struct parser *parser)
 {
 	int retval;
 	cmdline_parse_phase_func func;
@@ -382,7 +382,7 @@ int cmdline_parse(struct cmdline_parser *parser)
 }
 
 
-static int cmdline_parse_rawtoken(struct cmdline_parser *parser)
+static int cmdline_parse_rawtoken(struct parser *parser)
 {
 	int retval;
 	struct mempool *pool;
@@ -572,7 +572,7 @@ RETURN:
 }
 
 
-static int cmdline_ensure_cmdline_end(struct cmdline_parser *parser)
+static int cmdline_ensure_cmdline_end(struct parser *parser)
 {
 	struct lnode *node;
 	struct token *token;
@@ -589,7 +589,7 @@ static int cmdline_ensure_cmdline_end(struct cmdline_parser *parser)
 }
 
 
-static int cmdline_parse_classication(struct cmdline_parser *parser)
+static int cmdline_parse_classication(struct parser *parser)
 {
 	struct mempool *pool;
 	struct lnode *node;
@@ -685,13 +685,13 @@ static int cmdline_parse_classication(struct cmdline_parser *parser)
 
 
 #ifdef DEBUG
-static int cmdline_parse_expand(struct cmdline_parser *parser)
+static int cmdline_parse_expand(struct parser *parser)
 {
 	return CMDLINE_PARSE_OK;
 }
 
 
-static int cmdline_parse_token_print(struct cmdline_parser *parser)
+static int cmdline_parse_token_print(struct parser *parser)
 {
 	int i, count;
 	struct lnode *node;
@@ -713,7 +713,7 @@ static int cmdline_parse_token_print(struct cmdline_parser *parser)
 }
 
 
-static int cmdline_parse_end(struct cmdline_parser *parser)
+static int cmdline_parse_end(struct parser *parser)
 {
 	parser->errmsg = "parse end;";
 	return CMDLINE_PARSE_SYNTAX_ERROR;
@@ -721,7 +721,7 @@ static int cmdline_parse_end(struct cmdline_parser *parser)
 #endif
 
 
-const char *errmsg(struct cmdline_parser *parser)
+const char *errmsg(struct parser *parser)
 {
 	return parser->errmsg;
 }

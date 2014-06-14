@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
-#include "cmdline_parser.h"
+#include "parser.h"
 
 void cmdline_buf_clear(struct cmdline_buf *buf)
 {

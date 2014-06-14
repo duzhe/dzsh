@@ -12,7 +12,7 @@
 #include "mempool.h"
 #include "list.h"
 #include "str.h"
-#include "cmdline_parser.h"
+#include "parser.h"
 #include "env.h"
 
 
@@ -395,7 +395,7 @@ int main(int argc, char **argv)
 	struct list *cmdlist;
 	struct list *cmdline;
 	struct mempool *pool;
-	struct cmdline_parser *parser;
+	struct parser *parser;
 	struct lnode *node;
 	BOOL interactive;
 	BOOL line_complete;
@@ -447,7 +447,7 @@ int main(int argc, char **argv)
 		p_clear(pool);
 		cmdline_buf_clear(&buf);
 		cmdlist = l_create(pool);
-		parser = create_cmdline_parser(pool,  cmdlist, &buf, env);
+		parser = create_parser(pool,  cmdlist, &buf, env);
 
 		/* read commandline and parse */
 		if (interactive) {
@@ -480,7 +480,9 @@ int main(int argc, char **argv)
 			}
 		}
 		if (retval == CMDLINE_READING_TERMINATE) {
-			fputc('\n', stdout);
+			if (interactive) {
+				fputc('\n', stdout);
+			}
 			break;
 		}
 		if (retval == CMDLINE_READING_ERROR) {
