@@ -427,7 +427,7 @@ static int parser_parse_rawtoken(struct parser *parser)
 			case '[':  state = PARSE_STATE_TEST;++p;break;
 			case '|':  
 				ENSURE_NOTEND(p[1], CMDLINE_PARSE_CONTINUE);
-				if (p[1] == '&') {
+				if (p[1] == '|') {
 					PUSHBACK_TOKEN(2, TOKEN_TYPE_LOGIC_OR, 0);
 				}
 				else {
@@ -680,9 +680,15 @@ static int parser_parse_classication(struct parser *parser)
 		case TOKEN_TYPE_COMMENT:
 			break;
 		case TOKEN_TYPE_LOGIC_AND:
-			/*TODO*/
+			cmd->sep = CMD_SEPARATOR_LOGIC_AND;
+			l_pushback(cmdline, cmd);
+			cmd = create_command(pool);
+			break;
 		case TOKEN_TYPE_LOGIC_OR:
-			/*TODO*/
+			cmd->sep = CMD_SEPARATOR_LOGIC_OR;
+			l_pushback(cmdline, cmd);
+			cmd = create_command(pool);
+			break;
 		case TOKEN_TYPE_AND:
 			/*TODO*/
 		default:

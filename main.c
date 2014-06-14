@@ -102,8 +102,9 @@ void dbgout(struct command *cmd)
 */
 
 
-static int redirect_and_exec(struct mempool *pool, const char *bin, char **params,
-		char **envp, struct list *redirections, int fdin, int fdout)
+static int redirect_and_exec(struct mempool *pool, const char *bin,
+		char **params, char **envp, struct list *redirections, int fdin,
+		int fdout)
 {
 	int retval;
 	if (fdin != STDIN_FILENO) {
@@ -229,108 +230,131 @@ int execute_cmdline(struct mempool *pool, struct list *cmdline)
 	char **params;
 	char **envp;
 	int i;
-	int childstatus;
+	int exitstatus;
 	pid_t pid;
 	pid_t *pidpointer;
 	int retval;
+	cmdseparator sep;
 
-	fdin = STDIN_FILENO;
-	fdout = STDOUT_FILENO;
-	sonpids = l_create(pool);
-	/* each iteration produce a subprocess */
-	/* 1. prepare startup cmd and pipefds 
-	 * 2. fork  child process exec into specified command
-	 *          parent save child pid and go to next iteration
-	 * */
-	for (cmdnode = cmdline->first; cmdnode != NULL; 
-			cmdnode = cmdnode->next) {
-		/* prepare pipes */
-		/* pipefd[1] is for write , using it as STDOUT at the previous 
-		 * process (on the left side of '|' sign), pipefd[0] is for read, 
-		 * using it as STDIN at the next process (on the right side of '|'
-		 * sign)
-		 * first process, using STDIN as STDIN.
-		 * the last process , using STDOUT as STDOUT.
-		 */
-		cmd = cmdnode->data;
-		if (cmdnode->next != NULL) {
-			retval = pipe(pipefd);
-			if (retval == -1) {
-				fprintf(stderr, "%s: fail create pipe: %s\n", env->argv[0], 
-						strerror(errno));
+	sep = CMD_SEPARATOR_NONE;
+	exitstatus = 0;
+	for (cmdnode = cmdline->first;cmdnode != NULL;) {
+		fdin = STDIN_FILENO;
+		fdout = STDOUT_FILENO;
+		sonpids = l_create(pool);
+		if (sep == CMD_SEPARATOR_LOGIC_AND && exitstatus != 0) {
+			sep = CMD_SEPARATOR_PIPE;
+			for (;sep == CMD_SEPARATOR_PIPE; cmdnode = cmdnode->next) {
+				cmd = cmdnode->data;
+				sep = cmd->sep;
 			}
-			fdout = pipefd[1];
+			continue;
 		}
-		else {
-			fdout = STDOUT_FILENO;
+		else if (sep == CMD_SEPARATOR_LOGIC_OR && exitstatus == 0) {
+			sep = CMD_SEPARATOR_PIPE;
+			for (;sep == CMD_SEPARATOR_PIPE; cmdnode = cmdnode->next) {
+				cmd = cmdnode->data;
+				sep = cmd->sep;
+			}
+			continue;
 		}
+		/* each iteration produce a subprocess */
+		/* 1. prepare startup cmd and pipefds 
+		 * 2. fork  child process exec into specified command
+		 *          parent save child pid and go to next iteration
+		 * 3. when command end, paraent waiting for all child
+		 * */
+		sep = CMD_SEPARATOR_PIPE;
+		for (;sep == CMD_SEPARATOR_PIPE; cmdnode = cmdnode->next) {
+			/* prepare pipes */
+			/* pipefd[1] is for write , using it as STDOUT at the previous 
+			 * process (on the left side of '|' sign), pipefd[0] is for read, 
+			 * using it as STDIN at the next process (on the right side of '|'
+			 * sign)
+			 * first process, using STDIN as STDIN.
+			 * the last process , using STDOUT as STDOUT.
+			 */
+			cmd = cmdnode->data;
+			sep = cmd->sep;
+			if (sep == CMD_SEPARATOR_PIPE) {
+				retval = pipe(pipefd);
+				if (retval == -1) {
+					fprintf(stderr, "%s: fail create pipe: %s\n", env->argv[0], 
+							strerror(errno));
+				}
+				fdout = pipefd[1];
+			}
+			else {
+				fdout = STDOUT_FILENO;
+			}
 
-		/* get an array form 'params' */
-		paramscount = l_count(cmd->params);
-		params = p_alloc(pool, sizeof(char*) *(paramscount+1));
-		i = 0;
-		for (paramsnode = cmd->params->first; paramsnode != NULL;
-				paramsnode = paramsnode->next) {
-			params[i++] = p_sdup(pool, paramsnode->data);
-		}
-		params[i] = NULL;
-
-		/* gen an array form envp if envp is not empty */
-		paramscount = l_count(cmd->envp);
-		if (paramscount != 0) {
-			envp = p_alloc(pool, sizeof(char*) *(paramscount+1));
+			/* get an array form 'params' */
+			paramscount = l_count(cmd->params);
+			params = p_alloc(pool, sizeof(char*) *(paramscount+1));
 			i = 0;
-			for (paramsnode = cmd->envp->first; paramsnode != NULL;
+			for (paramsnode = cmd->params->first; paramsnode != NULL;
 					paramsnode = paramsnode->next) {
-				envp[i++] = p_sdup(pool, paramsnode->data);
+				params[i++] = p_sdup(pool, paramsnode->data);
 			}
-			envp[i] = NULL;
-		}
-		else {
-			envp = NULL;
-		}
+			params[i] = NULL;
 
-		/* fork and execute */
-		pid = fork();
-		if (pid == -1) {
-			fprintf(stderr, "%s\n", strerror(errno));
-			break;
-		}
-		if (pid == 0) {
-			/* create a new mempool to avoid COW */
-			pool = p_create(8196);
-			retval = search_bin(pool, cmd);
-			if (retval != 0) {
+			/* gen an array form envp if envp is not empty */
+			paramscount = l_count(cmd->envp);
+			if (paramscount != 0) {
+				envp = p_alloc(pool, sizeof(char*) *(paramscount+1));
+				i = 0;
+				for (paramsnode = cmd->envp->first; paramsnode != NULL;
+						paramsnode = paramsnode->next) {
+					envp[i++] = p_sdup(pool, paramsnode->data);
+				}
+				envp[i] = NULL;
+			}
+			else {
+				envp = NULL;
+			}
+
+			/* fork and execute */
+			pid = fork();
+			if (pid == -1) {
+				fprintf(stderr, "%s\n", strerror(errno));
+				break;
+			}
+			if (pid == 0) {
+				/* create a new mempool to avoid COW */
+				pool = p_create(8196);
+				retval = search_bin(pool, cmd);
+				if (retval != 0) {
+					p_destroy(pool);
+					exit(retval);
+				}
+				/* on success, redirect and exec will not return */
+				retval = redirect_and_exec(pool, cmd->bin, params, envp,
+						cmd->redirections, fdin, fdout);
 				p_destroy(pool);
 				exit(retval);
 			}
-			/* on success, redirect and exec will not return */
-			retval = redirect_and_exec(pool, cmd->bin, params, envp,
-					cmd->redirections, fdin, fdout);
-			p_destroy(pool);
-			exit(retval);
-		}
-		/* save son process pid */
-		pidpointer = p_alloc(pool, sizeof(pid_t));
-		*pidpointer = pid;
-		pidnode = l_pushback(sonpids, pidpointer);
+			/* save son process pid */
+			pidpointer = p_alloc(pool, sizeof(pid_t));
+			*pidpointer = pid;
+			pidnode = l_pushback(sonpids, pidpointer);
 
-		/* if 'fdin' or 'fdout' is pipe, close it */
-		if (fdin != STDIN_FILENO) {
-			close(fdin);
+			/* if 'fdin' or 'fdout' is pipe, close it */
+			if (fdin != STDIN_FILENO) {
+				close(fdin);
+			}
+			if (fdout != STDOUT_FILENO) {
+				close(fdout);
+			}
+			fdin = pipefd[0];
 		}
-		if (fdout != STDOUT_FILENO) {
-			close(fdout);
+		/* after the last fork, wait for all son process */
+		for (pidnode = sonpids->first; pidnode != NULL; 
+				pidnode = pidnode->next) {
+			pidpointer = pidnode->data;
+			waitpid(*pidpointer, &exitstatus, 0);
 		}
-		fdin = pipefd[0];
 	}
-	/* after the last fork, wait for all son process */
-	for (pidnode = sonpids->first; pidnode != NULL; 
-			pidnode = pidnode->next) {
-		pidpointer = pidnode->data;
-		waitpid(*pidpointer, &childstatus, 0);
-	}
-	return 0;
+	return exitstatus;
 }
 
 
@@ -515,7 +539,8 @@ int main(int argc, char **argv)
 			continue;
 		}
 		if (retval == CMDLINE_PARSE_TOKEN_TOO_LONG) {
-			fprintf(stderr, "%s: error parsing commandline: token is too long\n", argv[0]);
+			fprintf(stderr, "%s: error parsing commandline: token is too "
+					"long\n", argv[0]);
 			continue;
 		}
 		if (retval != CMDLINE_PARSE_DONE) {

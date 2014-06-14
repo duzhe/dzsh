@@ -22,6 +22,7 @@ struct redirection{
 };
 
 typedef unsigned int cmdseparator;
+#define CMD_SEPARATOR_NONE      0x00
 #define CMD_SEPARATOR_PIPE      0x01
 #define CMD_SEPARATOR_LOGIC_AND 0x02
 #define CMD_SEPARATOR_LOGIC_OR  0x03
