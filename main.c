@@ -87,21 +87,6 @@ int do_redirect(struct mempool *pool, struct list *redirections)
 }
 
 
-/*
-void dbgout(struct command *cmd)
-{
-	int pid;
-	int ppid;
-	struct str *bin;
-	pid = getpid();
-	ppid = getppid();
-	bin = cmd->params->first->data;
-	fprintf(stderr, "process start: pid: %d,  ppid: %d, bin:%s\n",
-			pid, ppid, bin);
-}
-*/
-
-
 static int redirect_and_exec(struct mempool *pool, const char *bin,
 		char **params, char **envp, struct list *redirections, int fdin,
 		int fdout)
@@ -198,7 +183,7 @@ static const char *getbinpathname(struct mempool *pool, struct str *bin,
 }
 
 
-static int search_bin(struct mempool *pool, struct command *cmd)
+static int resolve(struct mempool *pool, struct simple_command *cmd)
 {
 	struct str *bin;
 	const char *binfullpath;
@@ -217,169 +202,206 @@ static int search_bin(struct mempool *pool, struct command *cmd)
 }
 
 
-int execute_cmdline(struct mempool *pool, struct list *cmdline)
+static int execute_command(struct mempool *pool, struct command *cmd);
+
+
+static int execute_simple(struct mempool *pool, struct simple_command *cmd,
+		struct list *sonpids, int fdin, int fdout)
 {
-	int fdin, fdout;
-	struct list *sonpids;
-	struct lnode *cmdnode;
-	struct lnode *paramsnode;
-	struct lnode *pidnode;
-	struct command *cmd;
-	int pipefd[2];
 	int paramscount;
+	struct lnode *paramsnode;
 	char **params;
 	char **envp;
 	int i;
-	int exitstatus;
 	pid_t pid;
 	pid_t *pidpointer;
 	int retval;
-	cmdseparator sep;
+	int exitstatus;
 
-	sep = CMD_SEPARATOR_NONE;
-	exitstatus = 0;
-	for (cmdnode = cmdline->first;cmdnode != NULL;) {
-		fdin = STDIN_FILENO;
-		fdout = STDOUT_FILENO;
-		sonpids = l_create(pool);
-		if (sep == CMD_SEPARATOR_LOGIC_AND && exitstatus != 0) {
-			sep = CMD_SEPARATOR_PIPE;
-			for (;sep == CMD_SEPARATOR_PIPE; cmdnode = cmdnode->next) {
-				cmd = cmdnode->data;
-				sep = cmd->sep;
-			}
-			continue;
+	/* get an array form 'params' */
+	paramscount = l_count(cmd->params);
+	params = p_alloc(pool, sizeof(char*) *(paramscount+1));
+	i = 0;
+	for (paramsnode = cmd->params->first; paramsnode != NULL;
+			paramsnode = paramsnode->next) {
+		params[i++] = p_sdup(pool, paramsnode->data);
+	}
+	params[i] = NULL;
+
+	/* gen an array form envp if envp is not empty */
+	paramscount = l_count(cmd->envp);
+	if (paramscount != 0) {
+		envp = p_alloc(pool, sizeof(char*) *(paramscount+1));
+		i = 0;
+		for (paramsnode = cmd->envp->first; paramsnode != NULL;
+				paramsnode = paramsnode->next) {
+			envp[i++] = p_sdup(pool, paramsnode->data);
 		}
-		else if (sep == CMD_SEPARATOR_LOGIC_OR && exitstatus == 0) {
-			sep = CMD_SEPARATOR_PIPE;
-			for (;sep == CMD_SEPARATOR_PIPE; cmdnode = cmdnode->next) {
-				cmd = cmdnode->data;
-				sep = cmd->sep;
-			}
-			continue;
+		envp[i] = NULL;
+	}
+	else {
+		envp = NULL;
+	}
+
+	/* fork and execute */
+	pid = fork();
+	if (pid == -1) {
+		fprintf(stderr, "%s\n", strerror(errno));
+		return 255;
+	}
+	if (pid == 0) {
+		/* create a new mempool to avoid COW */
+		pool = p_create(8196);
+		retval = resolve(pool, cmd);
+		if (retval != 0) {
+			p_destroy(pool);
+			exit(retval);
 		}
-		/* each iteration produce a subprocess */
-		/* 1. prepare startup cmd and pipefds 
-		 * 2. fork  child process exec into specified command
-		 *          parent save child pid and go to next iteration
-		 * 3. when command end, paraent waiting for all child
-		 * */
-		sep = CMD_SEPARATOR_PIPE;
-		for (;sep == CMD_SEPARATOR_PIPE; cmdnode = cmdnode->next) {
-			/* prepare pipes */
-			/* pipefd[1] is for write , using it as STDOUT at the previous 
-			 * process (on the left side of '|' sign), pipefd[0] is for read, 
-			 * using it as STDIN at the next process (on the right side of '|'
-			 * sign)
-			 * first process, using STDIN as STDIN.
-			 * the last process , using STDOUT as STDOUT.
-			 */
-			cmd = cmdnode->data;
-			sep = cmd->sep;
-			if (sep == CMD_SEPARATOR_PIPE) {
-				retval = pipe(pipefd);
-				if (retval == -1) {
-					fprintf(stderr, "%s: fail create pipe: %s\n", env->argv[0], 
-							strerror(errno));
-				}
-				fdout = pipefd[1];
-			}
-			else {
-				fdout = STDOUT_FILENO;
-			}
+		/* on success, redirect and exec will not return */
+		retval = redirect_and_exec(pool, cmd->bin, params, envp,
+				cmd->redirections, fdin, fdout);
+		p_destroy(pool);
+		exit(retval);
+	}
+	/* save son process pid */
+	if (sonpids != NULL) {
+		pidpointer = p_alloc(pool, sizeof(pid_t));
+		*pidpointer = pid;
+		l_pushback(sonpids, pidpointer);
+		return 0;
+	}
+	waitpid(pid, &exitstatus, 0);
+	return exitstatus;
+}
 
-			/* get an array form 'params' */
-			paramscount = l_count(cmd->params);
-			params = p_alloc(pool, sizeof(char*) *(paramscount+1));
-			i = 0;
-			for (paramsnode = cmd->params->first; paramsnode != NULL;
-					paramsnode = paramsnode->next) {
-				params[i++] = p_sdup(pool, paramsnode->data);
-			}
-			params[i] = NULL;
 
-			/* gen an array form envp if envp is not empty */
-			paramscount = l_count(cmd->envp);
-			if (paramscount != 0) {
-				envp = p_alloc(pool, sizeof(char*) *(paramscount+1));
-				i = 0;
-				for (paramsnode = cmd->envp->first; paramsnode != NULL;
-						paramsnode = paramsnode->next) {
-					envp[i++] = p_sdup(pool, paramsnode->data);
-				}
-				envp[i] = NULL;
-			}
-			else {
-				envp = NULL;
-			}
+static int execute_pipe(struct mempool *pool, struct complex_command *cmd)
+{
+	int fdin, fdout;
+	struct lnode *node;
+	struct simple_command *curr;
+	struct list *sonpids;
+	int pipefd[2];
+	int retval;
+	pid_t *pidpointer;
+	int exitstatus;
 
-			/* fork and execute */
-			pid = fork();
-			if (pid == -1) {
-				fprintf(stderr, "%s\n", strerror(errno));
-				break;
-			}
-			if (pid == 0) {
-				/* create a new mempool to avoid COW */
-				pool = p_create(8196);
-				retval = search_bin(pool, cmd);
-				if (retval != 0) {
-					p_destroy(pool);
-					exit(retval);
-				}
-				/* on success, redirect and exec will not return */
-				retval = redirect_and_exec(pool, cmd->bin, params, envp,
-						cmd->redirections, fdin, fdout);
-				p_destroy(pool);
-				exit(retval);
-			}
-			/* save son process pid */
-			pidpointer = p_alloc(pool, sizeof(pid_t));
-			*pidpointer = pid;
-			pidnode = l_pushback(sonpids, pidpointer);
+	fdin = STDIN_FILENO;
+	fdout = STDOUT_FILENO;
+	sonpids = l_create(pool);
 
-			/* if 'fdin' or 'fdout' is pipe, close it */
-			if (fdin != STDIN_FILENO) {
-				close(fdin);
+	for (node = cmd->commands->first; node != NULL;
+			node = node->next) {
+		/* prepare pipes */
+		/* pipefd[1] is for write , using it as STDOUT at the previous 
+		 * process (on the left side of '|' sign), pipefd[0] is for read, 
+		 * using it as STDIN at the next process (on the right side of '|'
+		 * sign)
+		 * first process, using STDIN as STDIN.
+		 * the last process , using STDOUT as STDOUT.
+		 */
+		curr = node->data;
+		if (node->next != NULL) {
+			retval = pipe(pipefd);
+			if (retval == -1) {
+				fprintf(stderr, "%s: fail create pipe: %s\n", env->argv[0], 
+						strerror(errno));
+				return 255;
 			}
-			if (fdout != STDOUT_FILENO) {
-				close(fdout);
-			}
-			fdin = pipefd[0];
+			fdout = pipefd[1];
 		}
-		/* after the last fork, wait for all son process */
-		for (pidnode = sonpids->first; pidnode != NULL; 
-				pidnode = pidnode->next) {
-			pidpointer = pidnode->data;
-			waitpid(*pidpointer, &exitstatus, 0);
+		else {
+			fdout = STDOUT_FILENO;
 		}
+		/* now we asume that there are only simple command in pipe command */
+		execute_simple(pool, curr, sonpids, fdin, fdout);
+		/* if 'fdin' or 'fdout' is pipe, close it */
+		if (fdin != STDIN_FILENO) {
+			close(fdin);
+		}
+		if (fdout != STDOUT_FILENO) {
+			close(fdout);
+		}
+		fdin = pipefd[0];
+	}
+	/* after the last fork, wait for all son process */
+	for (node = sonpids->first; node != NULL; 
+			node = node->next) {
+		pidpointer = node->data;
+		waitpid(*pidpointer, &exitstatus, 0);
 	}
 	return exitstatus;
 }
 
 
-#ifdef PRINT_COMMAND_ONLY
-void print_cmdline(struct list *cmdline)
+static int execute_logic(struct mempool *pool, struct complex_command *cmd)
 {
-	struct command *cmd;
 	struct lnode *cmdnode;
-	struct str *param;
+	struct command *curr;
+	int exitstatus;
+	cmdseperator sep;
+
+	sep = CMD_SEPERATOR_NONE;
+	exitstatus = 0;
+	for (cmdnode = cmd->commands->first; cmdnode != NULL;
+			cmdnode = cmdnode->next) {
+		curr = cmdnode->data;
+
+		if (sep == CMD_SEPERATOR_LOGIC_AND && exitstatus != 0) {
+			sep = command_get_seperator(curr);
+			continue;
+		}
+		if (sep == CMD_SEPERATOR_LOGIC_OR && exitstatus == 0) {
+			sep = command_get_seperator(curr);
+			continue;
+		}
+		exitstatus = execute_command(pool, curr);
+		sep = command_get_seperator(curr);
+	}
+	return exitstatus;
+}
+
+static int execute_command(struct mempool *pool, struct command *cmd)
+{
+	switch(cmd->type) {
+		case CMD_TYPE_SIMPLE:
+			return  execute_simple(pool, (struct simple_command *)cmd, NULL,
+					STDIN_FILENO, STDOUT_FILENO);
+		case CMD_TYPE_PIPE:
+			return execute_pipe(pool, (struct complex_command *)cmd);
+		case CMD_TYPE_LOGIC:
+			return execute_logic(pool, (struct complex_command *)cmd);
+		default:
+			/* assert(0)*/
+			break;
+	}
+	/* assert(0)*/
+	return 0;
+}
+
+
+#ifdef PRINT_COMMAND_ONLY
+static void print_command(struct command *cmd)
+{
+	struct simple_command *c;
 	struct lnode *node;
+	struct str *param;
 	struct redirection *re;
-	
-	for (cmdnode = cmdline->first; cmdnode != NULL; cmdnode = cmdnode->next) {
-		cmd = cmdnode->data;
-		for (node = cmd->envp->first; node != NULL; node = node->next) {
+	cmdseperator sep;
+
+	if (cmd->type == CMD_TYPE_SIMPLE) {
+		c = (struct simple_command *)cmd;
+		for (node = c->envp->first; node != NULL; node = node->next) {
 			param = node->data;
 			s_print(param, stdout);
 			fputc(' ', stdout);
 		}
-		for (node = cmd->params->first; node != NULL; node = node->next) {
+		for (node = c->params->first; node != NULL; node = node->next) {
 			param = node->data;
 			s_print(param, stdout);
 			fputc(' ', stdout);
 		}
-		for (node = cmd->redirections->first; node != NULL; node = node->next) {
+		for (node = c->redirections->first; node != NULL; node = node->next) {
 			re = node->data;
 			switch (re->flags) {
 				case 0:
@@ -408,11 +430,27 @@ void print_cmdline(struct list *cmdline)
 					break;
 			}
 		}
-		if (cmdnode->next != NULL) {
-			printf(" | ");
+	}
+	else if (cmd->type == CMD_TYPE_PIPE) {
+		for (node = ((struct complex_command *)cmd)->commands->first;
+				node != NULL; node = node->next) {
+			print_command(node->data);
+			if (node->next != NULL) {
+				printf(" | ");
+			}
 		}
 	}
-	printf("\n");
+	else if (cmd->type == CMD_TYPE_LOGIC) {
+		for (node = ((struct complex_command *)cmd)->commands->first;
+				node != NULL; node = node->next) {
+			print_command(node->data);
+
+			if (node->next != NULL) {
+				sep = command_get_seperator(node->data);
+				printf(sep == CMD_SEPERATOR_LOGIC_AND ? " && " : " || ");
+			}
+		}
+	}
 }
 #endif
 
@@ -438,7 +476,7 @@ int main(int argc, char **argv)
 	int retval;
 	FILE *instream;
 	struct list *cmdlist;
-	struct list *cmdline;
+	struct command *cmd;
 	struct mempool *pool;
 	struct parser *parser;
 	struct lnode *node;
@@ -549,11 +587,11 @@ int main(int argc, char **argv)
 		}
 
 		for (node = cmdlist->first; node != NULL; node = node->next) {
-			cmdline = node->data;
+			cmd = node->data;
 #ifdef PRINT_COMMAND_ONLY
-			print_cmdline(cmdline);
+			print_command(cmd);
 #else
-			execute_cmdline(pool, cmdline);
+			execute_command(pool, cmd);
 #endif
 		}
 	}

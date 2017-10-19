@@ -57,7 +57,7 @@ struct parser
 	int phase;
 	int state;
 	const char *p;
-	struct command *cmd;
+	struct simple_command *cmd;
 	struct list *toklist;
 	const char *errmsg;
 };
@@ -67,9 +67,7 @@ static int parser_parse_rawtoken(struct parser *parser);
 static int parser_ensure_cmdline_end(struct parser *parser);
 static int parser_parse_classication(struct parser *parser);
 #ifdef DEBUG
-static int parser_parse_expand(struct parser *parser);
 static int parser_parse_token_print(struct parser *parser);
-static int parser_parse_end(struct parser *parser);
 #endif
 
 static parser_parse_phase_func phase_func[] = {
@@ -79,10 +77,6 @@ static parser_parse_phase_func phase_func[] = {
 #endif
 	parser_ensure_cmdline_end,
 	&parser_parse_classication,
-	/*
-	&parser_parse_end,
-	&parser_parse_expand,
-	*/
 };
 
 
@@ -584,8 +578,10 @@ static int parser_parse_classication(struct parser *parser)
 	struct lnode        *node;
 	struct token        *token;
 	struct list         *cmdlist;
-	struct list         *cmdline;
-	struct command      *cmd;
+	struct complex_command *pipecmd;
+	struct complex_command *logiccmd;
+	struct simple_command      *cmd;
+	void *c;
 	struct redirection  *re;
 	int                  retval;
 	BOOL                 redirect_file;
@@ -596,7 +592,8 @@ static int parser_parse_classication(struct parser *parser)
 	if (cmdlist == NULL) {
 		cmdlist = l_create(pool);
 	}
-	cmdline = l_create(pool);
+	pipecmd = NULL;
+	logiccmd = NULL;
 	cmd = create_command(pool);
 	re = NULL;
 	redirect_file = FALSE;
@@ -657,13 +654,20 @@ static int parser_parse_classication(struct parser *parser)
 		case TOKEN_TYPE_ENDLINE:
 		case TOKEN_TYPE_SIMICOLON:
 			if (!command_empty(cmd)) {
-				cmd->sep = CMD_SEPARATOR_END;
-				l_pushback(cmdline, cmd);
+				cmd->sep = CMD_SEPERATOR_END;
+				c = cmd;
+				if (pipecmd != NULL) {
+					l_pushback(pipecmd->commands, c);
+					c = pipecmd;
+					pipecmd = NULL;
+				}
+				if (logiccmd != NULL) {
+					l_pushback(logiccmd->commands, c);
+					c = logiccmd;
+					logiccmd = NULL;
+				}
+				l_pushback(cmdlist, c);
 				cmd = create_command(pool);
-			}
-			if (!l_empty(cmdline)) {
-				l_pushback(cmdlist, cmdline);
-				cmdline = l_create(pool);
 			}
 			break;
 		case TOKEN_TYPE_PIPE:
@@ -671,30 +675,50 @@ static int parser_parse_classication(struct parser *parser)
 				parser->errmsg = "invalid syntax";
 				return CMDLINE_PARSE_SYNTAX_ERROR;
 			}
-			else {
-				cmd->sep = CMD_SEPARATOR_PIPE;
-				l_pushback(cmdline, cmd);
-				cmd = create_command(pool);
+			if (pipecmd == NULL) {
+				pipecmd = create_pipe_command(pool);
 			}
+			cmd->sep = CMD_SEPERATOR_PIPE;
+			l_pushback(pipecmd->commands, cmd);
+			cmd = create_command(pool);
 			break;
 		case TOKEN_TYPE_COMMENT:
 			break;
 		case TOKEN_TYPE_LOGIC_AND:
-			cmd->sep = CMD_SEPARATOR_LOGIC_AND;
-			l_pushback(cmdline, cmd);
+			cmd->sep = CMD_SEPERATOR_LOGIC_AND;
+			if (logiccmd == NULL) {
+				logiccmd = create_logic_command(pool);
+			}
+			if (pipecmd != NULL) {
+				l_pushback(pipecmd->commands, cmd);
+				l_pushback(logiccmd->commands, pipecmd);
+				pipecmd = NULL;
+			}
+			else {
+				l_pushback(logiccmd->commands, cmd);
+			}
 			cmd = create_command(pool);
 			break;
 		case TOKEN_TYPE_LOGIC_OR:
-			cmd->sep = CMD_SEPARATOR_LOGIC_OR;
-			l_pushback(cmdline, cmd);
+			cmd->sep = CMD_SEPERATOR_LOGIC_OR;
+			if (logiccmd == NULL) {
+				logiccmd = create_logic_command(pool);
+			}
+			if (pipecmd != NULL) {
+				l_pushback(pipecmd->commands, cmd);
+				l_pushback(logiccmd->commands, pipecmd);
+				pipecmd = NULL;
+			}
+			else {
+				l_pushback(logiccmd->commands, cmd);
+			}
 			cmd = create_command(pool);
 			break;
 		case TOKEN_TYPE_AND:
 			/*TODO*/
 		default:
-			cmd->sep = CMD_SEPARATOR_END;
-			l_pushback(cmdline, cmd);
-			cmd = create_command(pool);
+			parser->errmsg = "unexpected token type";
+			return CMDLINE_PARSE_SYNTAX_ERROR;
 			break;
 		}
 	}
@@ -703,12 +727,6 @@ static int parser_parse_classication(struct parser *parser)
 
 
 #ifdef DEBUG
-static int parser_parse_expand(struct parser *parser)
-{
-	return CMDLINE_PARSE_OK;
-}
-
-
 static int parser_parse_token_print(struct parser *parser)
 {
 	int i, count;
@@ -730,12 +748,6 @@ static int parser_parse_token_print(struct parser *parser)
 	return CMDLINE_PARSE_OK;
 }
 
-
-static int parser_parse_end(struct parser *parser)
-{
-	parser->errmsg = "parse end;";
-	return CMDLINE_PARSE_SYNTAX_ERROR;
-}
 #endif
 
 
