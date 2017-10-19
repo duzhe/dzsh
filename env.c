@@ -12,7 +12,7 @@ int initialize_env(struct mempool *pool, int argc, char **argv)
 {
 	struct list *pathentry;
 	char *ppathbuf;
-	char *tok;
+	char *token;
 	env = p_alloc(pool, sizeof(struct env));
 	env->pool = pool;
 	env->argc = argc;
@@ -37,10 +37,10 @@ int initialize_env(struct mempool *pool, int argc, char **argv)
 
 	ppathbuf = p_strdup(pool, env->PATH);
 	pathentry = l_create(pool);
-	tok = strtok(ppathbuf, ":");
-	while (tok != NULL) {
-		l_pushback(pathentry, s_make(pool, tok, strlen(tok)));
-		tok = strtok(NULL, ":");
+	token = strtok(ppathbuf, ":");
+	while (token != NULL) {
+		l_pushback(pathentry, s_make(pool, token, strlen(token)));
+		token = strtok(NULL, ":");
 	}
 	env->pathentry = pathentry;
 

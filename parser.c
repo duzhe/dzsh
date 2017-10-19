@@ -29,7 +29,6 @@ static int isnumeric(const char *p)
 */
 #define PARSE_STATE_SQUOTE 		0x05
 #define PARSE_STATE_DQUOTE 		0x06
-#define PARSE_STATE_FUNCTION 	0x07
 #define PARSE_STATE_BACKTICK 	0x08
 /*
 #define PARSE_STATE_ENCLOSE		0x06
@@ -37,10 +36,8 @@ static int isnumeric(const char *p)
 #define PARSE_STATE_BACKSLASH 	0x09
 #define PARSE_STATE_REDIRECT	0x10
 #define PARSE_STATE_ASSIGNMENT	0x11
-#define PARSE_STATE_TEST		0x12
 #define PARSE_STATE_COMMENT		0x13
 #define PARSE_STATE_JOB			0x14
-#define PARSE_STATE_FUNCBODY	0x15
 
 #define PARSE_PHASE_TOKEN	0x00
 #define PARSE_PHASE_ESCAPE  0x01
@@ -58,13 +55,13 @@ struct parser
 	int state;
 	const char *p;
 	struct simple_command *cmd;
-	struct list *toklist;
+	struct list *tokenlist;
 	const char *errmsg;
 };
 
 typedef int (*parser_parse_phase_func)(struct parser *);
 static int parser_parse_rawtoken(struct parser *parser);
-static int parser_ensure_cmdline_end(struct parser *parser);
+static int parser_ensure_line_ending(struct parser *parser);
 static int parser_parse_classication(struct parser *parser);
 #ifdef DEBUG
 static int parser_parse_token_print(struct parser *parser);
@@ -75,7 +72,7 @@ static parser_parse_phase_func phase_func[] = {
 #ifdef DEBUG
 	&parser_parse_token_print,
 #endif
-	parser_ensure_cmdline_end,
+	&parser_ensure_line_ending,
 	&parser_parse_classication,
 };
 
@@ -87,8 +84,8 @@ static parser_parse_phase_func phase_func[] = {
 #define TOKEN_TYPE_AND                   0x04
 #define TOKEN_TYPE_LOGIC_AND             0x05
 #define TOKEN_TYPE_LOGIC_OR              0x06
-#define TOKEN_TYPE_SIMICOLON             0x07
-#define TOKEN_TYPE_ENDLINE               0x08
+#define TOKEN_TYPE_SEMICOLON             0x07
+#define TOKEN_TYPE_LINE_ENDING           0x08
 #define TOKEN_TYPE_TERMINATE             0x09
 #define TOKEN_TYPE_COMMENT               0x0a
 #define TOKEN_TYPE_TEST                  0x0b
@@ -115,59 +112,8 @@ static parser_parse_phase_func phase_func[] = {
 struct token {
 	unsigned int type:16;
 	unsigned int flags:16;
-	struct str tok;
+	struct str value;
 };
-/*
-struct token {
-	unsigned int type;
-	struct {
-		struct str tok;
-		struct list* subtok;
-	}
-};
-*/
-
-
-/*
-struct token *create_tok(struct mempool *pool, unsigned int type,
-		const char *tokbegin=NULL, const char *tokend=NULL)
-{
-	struct token *tok = (struct token *)p_alloc(sizeof(struct token));
-	tok->type = type;
-	switch(type) {
-	case TOKEN_TYPE_SIMPLE:
-	case TOKEN_TYPE_REDIRECT:
-	case TOKEN_TYPE_PIPE:
-	case TOKEN_TYPE_AND:
-	case TOKEN_TYPE_LOGIC_AND:		
-	case TOKEN_TYPE_SIMICOLON:
-	case TOKEN_TYPE_ENDLINE:
-	case TOKEN_TYPE_TERMINATE:
-	case TOKEN_TYPE_COMMENT:
-	case TOKEN_TYPE_TEST:
-	case TOKEN_TYPE_JOB:
-	case TOKEN_TYPE_FUNCNAME:
-	case TOKEN_TYPE_FUNCBODY:
-	case TOKEN_TYPE_BACKTICK:
-	case TOKEN_TYPE_VARIABLE:
-		tok->data = p_strndup(pool, tokbegin, tokend-tokbegin);
-		tok->len = tokend - tokbegin;
-		break;
-	case TOKEN_TYPE_NORMAL:
-	case TOKEN_TYPE_SPECIALVAR:
-	case TOKEN_TYPE_SUBCMDLINE:
-	case TOKEN_TYPE_DQUOTED:
-	case TOKEN_TYPE_SQUOTED:
-	case TOKEN_TYPE_BACKSLASH:
-		tok->subtok = l_create(pool);
-		break;
-	default:
-		assert(false);
-		break;
-	}
-	return tok;
-}
-*/
 
 
 struct parser *create_parser(struct mempool *pool, 
@@ -180,52 +126,16 @@ struct parser *create_parser(struct mempool *pool,
 	parser->cmdlist = cmdlist;
 	parser->cmdlinebuf = buf;
 	parser->env = env;
-	parser->toklist = l_create(pool);
+	parser->tokenlist = l_create(pool);
 	parser->phase = PARSE_PHASE_TOKEN;
 	parser->state = PARSE_STATE_BEGIN;
 	parser->p = buf->data;
 	return parser;
 }
 
-/*
-static char *next_token_begin(struct parser *parser, char *p)
+static const char *get_enclose(const char *p, int ch)
 {
-	const char *IFS;
-	IFS = parser->IFS;
-	while (*p != '\0' && strchr(IFS, *p) != NULL) {
-		p++;
-	}
-	if (*p == '\0') {
-		return NULL;
-	}
-	return p;
-}
-*/
-
-
-/*
-static const char *next_token_end(struct parser *parser, const char *p)
-{
-	const char *IFS = parser->IFS;
-	while (*p != '\0' && strchr(IFS, *p) != NULL) {
-		p++;
-	}
-	while (*p != '\0' && strchr(IFS, *p) == NULL) {
-		p++;
-	}
-	if (*p == '\0') {
-		return NULL;
-	}
-	return p;
-}
-*/
-
-
-static const char *get_enclose(const char *begin, int ch)
-{
-	const char *p;
-	p = begin;
-	while (*p != '\0') {
+	for (;*p != '\0';p++) {
 		if (*p == ch) {
 			return p;
 		}
@@ -235,69 +145,22 @@ static const char *get_enclose(const char *begin, int ch)
 				break;
 			}
 		}
-		p++;
 	}
 	return p;
 }
 
 
-static const char *get_function_end(const char *p)
+const char *get_token_start(const char *p, const char *IFS)
 {
-	int state;
-	int count;
-	state = 0;
-	count = 0;
-	for (;*p != '\0';++p) {
-		switch (*p) {
-		case '\\':
-			/* skip next charactor whatever it is */
-			++p;
-			if (*p == '\0') {
-				return p;
-			}
-			break;
-		case '\'':
-		case '"':
-		case '`':
-			if (state == 0) {
-				state = *p;
-			}
-			else if (state == *p) {
-				state = 0;
-			}
-			break;
-		case '{':
-			if (state == 0) {
-				++count;
-			}
-			break;
-		case '}':
-			if (state == 0) {
-				--count;
-			}
-			if (count <= 0) {
-				return p;
-			}
-			break;
-		default:
-			break;
-		}
-	}
+	for (; p && *p != '\0' && *p != '\n' && strchr(IFS, *p) != NULL; ++p);
 	return p;
 }
 
 
-const char *get_token_begin(const char *begin, const char *IFS)
+const char *get_token_finish(const char *p, const char *IFS)
 {
-	for (; begin && *begin != '\0' && *begin != '\n' && strchr(IFS, *begin) != NULL; ++begin);
-	return begin;
-}
-
-
-const char *get_token_end(const char *begin, const char *IFS)
-{
-	for (; begin && *begin != '\0' && strchr(IFS, *begin) == NULL; ++begin);
-	return begin;
+	for (; p && *p != '\0' && strchr(IFS, *p) == NULL; ++p);
+	return p;
 }
 
 
@@ -365,34 +228,33 @@ static int parser_parse_rawtoken(struct parser *parser)
 {
 	int retval;
 	struct mempool *pool;
-	struct list *toklist;
+	struct list *tokenlist;
+	const char *p;
+	const char *start;
+	const char *finish;
 	int state;
-	const char *tokbegin;
-	const char *p, *close;
-	const char *IFS;
-	int tokenflags;
-	struct token *ptok;
-	struct str ttok;
+	int flags;
+	struct token *token;
+	struct str tmp;
 	
 	pool = parser->pool;
-	toklist = parser->toklist;
+	tokenlist = parser->tokenlist;
 	state = parser->state;
-	tokbegin = parser->cmdlinebuf->data;
+	start = parser->cmdlinebuf->data;
 	p = parser->p;
-	IFS = parser->env->IFS;
-	tokenflags = 0;
+	flags = 0;
 	retval = CMDLINE_PARSE_OK;
 
 #define PUSHBACK_TOKEN(ENDOFFSET, TOKENTYPE, TOKENFLAGS) \
 	p += ENDOFFSET; \
-	ptok = p_alloc(pool, sizeof(struct token)); \
-	ptok->type = TOKENTYPE; \
-	ptok->flags = tokenflags | TOKENFLAGS;\
-	ptok->tok.len = p - tokbegin; \
-	ptok->tok.data = p_strndup(pool, tokbegin, p-tokbegin); \
-	l_pushback(toklist, ptok); \
-	tokenflags = 0; \
-	tokbegin = p; \
+	token = p_alloc(pool, sizeof(struct token)); \
+	token->type = TOKENTYPE; \
+	token->flags = flags | TOKENFLAGS;\
+	token->value.len = p - start; \
+	token->value.data = p_strndup(pool, start, p-start); \
+	l_pushback(tokenlist, token); \
+	flags = 0; \
+	start = p; \
 	state = PARSE_STATE_BEGIN;
 
 #define ERROR_RETURN(MSG, RETCODE) \
@@ -400,7 +262,7 @@ static int parser_parse_rawtoken(struct parser *parser)
 	retval = RETCODE; \
 	goto RETURN; 
 
-#define ENSURE_NOTEND(CH, RETVAL) \
+#define ENSURE_NOT_END(CH, RETVAL) \
 	if (CH == '\0') { \
 		retval = RETVAL; \
 		goto RETURN; \
@@ -409,7 +271,7 @@ static int parser_parse_rawtoken(struct parser *parser)
 	while (*p != '\0') {
 		switch (state) {
 		case PARSE_STATE_BEGIN:
-			p = tokbegin = get_token_begin(tokbegin, IFS);
+			p = start = get_token_start(start, parser->env->IFS);
 			if (*p == '\0') {
 				retval =  CMDLINE_PARSE_OK;
 				goto RETURN;
@@ -418,9 +280,8 @@ static int parser_parse_rawtoken(struct parser *parser)
 			case '\'': state = PARSE_STATE_SQUOTE;++p;break;
 			case '"':  state = PARSE_STATE_DQUOTE;++p;break;
 			case '`':  state = PARSE_STATE_BACKTICK;++p;break;
-			case '[':  state = PARSE_STATE_TEST;++p;break;
 			case '|':  
-				ENSURE_NOTEND(p[1], CMDLINE_PARSE_CONTINUE);
+				ENSURE_NOT_END(p[1], CMDLINE_PARSE_CONTINUE);
 				if (p[1] == '|') {
 					PUSHBACK_TOKEN(2, TOKEN_TYPE_LOGIC_OR, 0);
 				}
@@ -429,7 +290,7 @@ static int parser_parse_rawtoken(struct parser *parser)
 				}
 				break;
 			case '&':
-				ENSURE_NOTEND(p[1], CMDLINE_PARSE_CONTINUE);
+				ENSURE_NOT_END(p[1], CMDLINE_PARSE_CONTINUE);
 				if (p[1] == '&') {
 					PUSHBACK_TOKEN(2, TOKEN_TYPE_LOGIC_AND, 0);
 				}
@@ -437,7 +298,7 @@ static int parser_parse_rawtoken(struct parser *parser)
 					PUSHBACK_TOKEN(1, TOKEN_TYPE_AND, 0);
 				}
 				break;
-			case ';':PUSHBACK_TOKEN(1, TOKEN_TYPE_SIMICOLON, 0);break;
+			case ';':PUSHBACK_TOKEN(1, TOKEN_TYPE_SEMICOLON, 0);break;
 			case '<':
 			case '>':
 				 state = PARSE_STATE_REDIRECT;
@@ -445,66 +306,56 @@ static int parser_parse_rawtoken(struct parser *parser)
 			case '(': ERROR_RETURN("invalid syntax: unexpected '('", CMDLINE_PARSE_SYNTAX_ERROR);
 			case ')': ERROR_RETURN("invalid syntax: unexpected ')'", CMDLINE_PARSE_SYNTAX_ERROR);
 			case '#': state = PARSE_STATE_COMMENT; break;
-			case '\n': PUSHBACK_TOKEN(1, TOKEN_TYPE_ENDLINE, 0);break;
+			case '\n': PUSHBACK_TOKEN(1, TOKEN_TYPE_LINE_ENDING, 0);break;
 			default: state = PARSE_STATE_NORMAL; break;
 			}
 			break; /* goto next state */
 		case PARSE_STATE_COMMENT:
 			p = get_enclose(p, '\n');
-			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+			ENSURE_NOT_END(*p, CMDLINE_PARSE_CONTINUE);
 			PUSHBACK_TOKEN(1, TOKEN_TYPE_COMMENT, 0);
 			break;
 		case PARSE_STATE_SQUOTE:
 			p = get_enclose(p, '\'');
-			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+			ENSURE_NOT_END(*p, CMDLINE_PARSE_CONTINUE);
 			PUSHBACK_TOKEN(1, TOKEN_TYPE_NORMAL, TOKEN_FLAGS_SQUOTED);
 			break;
 		case PARSE_STATE_DQUOTE:
 			p = get_enclose(p, '"');
-			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+			ENSURE_NOT_END(*p, CMDLINE_PARSE_CONTINUE);
 			PUSHBACK_TOKEN(1, TOKEN_TYPE_NORMAL, TOKEN_FLAGS_DQUOTED);
 			break;
 		case PARSE_STATE_BACKTICK:
 			p = get_enclose(p, '`');
-			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
+			ENSURE_NOT_END(*p, CMDLINE_PARSE_CONTINUE);
 			PUSHBACK_TOKEN(1, TOKEN_TYPE_NORMAL, 0);
-			break;
-		case PARSE_STATE_TEST:
-			p = get_enclose(p, ']');
-			ENSURE_NOTEND(*p, CMDLINE_PARSE_CONTINUE);
-			PUSHBACK_TOKEN(1, TOKEN_TYPE_TEST, 0);
 			break;
 		case PARSE_STATE_NORMAL:
 			switch (*p) {
 			case '\\':
-				ENSURE_NOTEND(*(p+1), CMDLINE_PARSE_CONTINUE);
-				tokenflags |= TOKEN_FLAGS_BACKSLASH;
+				ENSURE_NOT_END(*(p+1), CMDLINE_PARSE_CONTINUE);
+				flags |= TOKEN_FLAGS_BACKSLASH;
 				p+=2;
 				break;
 			case '(' :
-				if (*(p+1) != ')') {
-					ERROR_RETURN("invalid syntax: unexpected charactor after '('",
-							CMDLINE_PARSE_SYNTAX_ERROR);
-				}
-				PUSHBACK_TOKEN(0, TOKEN_TYPE_FUNCNAME, 0);
-				state = PARSE_STATE_FUNCBODY;
-				p+=2;
+				ERROR_RETURN("function not support yet",
+						CMDLINE_PARSE_SYNTAX_ERROR);
 				break;
 			case '=':
-				tokenflags |= TOKEN_FLAGS_ASSIGNMENT;
+				flags |= TOKEN_FLAGS_ASSIGNMENT;
 				p++;
 				break;
 			case '>':
 			case '<':
-				ttok.data = tokbegin;
-				ttok.len = p - tokbegin;
-				if (p != tokbegin && !s_isnumeric(&ttok)) {
+				tmp.data = start;
+				tmp.len = p - start;
+				if (p != start && !s_isnumeric(&tmp)) {
 					PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
 				}
 				state = PARSE_STATE_REDIRECT;
 				break;
 			default:
-				if (strchr(IFS, *p) != NULL) {
+				if (strchr(parser->env->IFS, *p) != NULL) {
 					PUSHBACK_TOKEN(0, TOKEN_TYPE_NORMAL, 0);
 					break;
 				}
@@ -512,30 +363,15 @@ static int parser_parse_rawtoken(struct parser *parser)
 				break;
 			}
 			break;
-		case PARSE_STATE_FUNCBODY:
-			tokbegin = get_token_begin(tokbegin, IFS);
-			ENSURE_NOTEND(*tokbegin, CMDLINE_PARSE_CONTINUE);
-			if (*tokbegin != '{' ) {
-				parser->errmsg = "invalid syntax: expected '{'";
-				retval = CMDLINE_PARSE_SYNTAX_ERROR;
-				goto RETURN;
-			}
-			p = get_function_end(tokbegin);
-			if (*p == '\0') {
-				retval = CMDLINE_PARSE_CONTINUE;
-				goto RETURN;
-			}
-			PUSHBACK_TOKEN(0, TOKEN_TYPE_FUNCBODY, 0);
-			break;
 		case PARSE_STATE_REDIRECT:
 			if (*p == '>' && *(p+1) == '>') {
 				p+=1;
 			}
 			if (*(p+1) == '&') {
-				ENSURE_NOTEND(*(p+2), CMDLINE_PARSE_CONTINUE);
-				close = get_token_end(p+2, IFS);
-				ENSURE_NOTEND(*close, CMDLINE_PARSE_CONTINUE);
-				p = close;
+				ENSURE_NOT_END(*(p+2), CMDLINE_PARSE_CONTINUE);
+				finish = get_token_finish(p+2, parser->env->IFS);
+				ENSURE_NOT_END(*finish, CMDLINE_PARSE_CONTINUE);
+				p = finish;
 			}
 			else {
 				p += 1;
@@ -548,24 +384,24 @@ static int parser_parse_rawtoken(struct parser *parser)
 		}
 	}
 RETURN:
-	cmdline_buf_parsed(parser->cmdlinebuf, tokbegin);
-	parser->p = p - (tokbegin - parser->cmdlinebuf->data);
+	cmdline_buf_parsed(parser->cmdlinebuf, start);
+	parser->p = p - (start - parser->cmdlinebuf->data);
 	parser->state = state;
 	return retval;
 }
 
 
-static int parser_ensure_cmdline_end(struct parser *parser)
+static int parser_ensure_line_ending(struct parser *parser)
 {
 	struct lnode *node;
 	struct token *token;
 
-	node = parser->toklist->last;
+	node = parser->tokenlist->last;
 	if (node == NULL) {
 		return CMDLINE_PARSE_CONTINUE;
 	}
 	token = node->data;
-	if (token->type == TOKEN_TYPE_ENDLINE) {
+	if (token->type == TOKEN_TYPE_LINE_ENDING) {
 		return CMDLINE_PARSE_OK;
 	}
 	return CMDLINE_PARSE_CONTINUE;
@@ -600,17 +436,17 @@ static int parser_parse_classication(struct parser *parser)
 	parsingenv = TRUE;
 
 
-	for (node = parser->toklist->first; node != NULL; node = node->next) {
+	for (node = parser->tokenlist->first; node != NULL; node = node->next) {
 		token = node->data;
 		if (redirect_file) {
 			switch(token->type) {
 			case TOKEN_TYPE_NORMAL:
 				if (token->flags & (TOKEN_FLAGS_DQUOTED | TOKEN_FLAGS_SQUOTED)) {
-					re->right.pathname =  s_make(pool, token->tok.data+1, 
-							token->tok.len-2);
+					re->right.pathname =  s_make(pool, token->value.data+1, 
+							token->value.len-2);
 				}
 				else {
-					re->right.pathname = &(token->tok);
+					re->right.pathname = &(token->value);
 				}
 				break;
 			default:
@@ -625,7 +461,7 @@ static int parser_parse_classication(struct parser *parser)
 			if (parsingenv) {
 				if (token->flags & TOKEN_FLAGS_ASSIGNMENT && !(token->flags &
 						(TOKEN_FLAGS_DQUOTED | TOKEN_FLAGS_SQUOTED))) {
-					l_pushback(cmd->envp, &(token->tok));
+					l_pushback(cmd->envp, &(token->value));
 					break;
 				}
 				else {
@@ -633,16 +469,16 @@ static int parser_parse_classication(struct parser *parser)
 				}
 			}
 			if (token->flags & (TOKEN_FLAGS_DQUOTED | TOKEN_FLAGS_SQUOTED)) {
-				l_pushback(cmd->params, s_make(pool, token->tok.data+1,
-							token->tok.len-2));
+				l_pushback(cmd->params, s_make(pool, token->value.data+1,
+							token->value.len-2));
 			}
 			else {
-				l_pushback(cmd->params, &(token->tok));
+				l_pushback(cmd->params, &(token->value));
 			}
 			break;
 		case TOKEN_TYPE_REDIRECT:
 			re = p_alloc(pool, sizeof(struct redirection));
-			retval = parser_parse_redirection(parser, &(token->tok), re);
+			retval = parser_parse_redirection(parser, &(token->value), re);
 			if (retval != CMDLINE_PARSE_OK) {
 				return retval;
 			}
@@ -651,8 +487,8 @@ static int parser_parse_classication(struct parser *parser)
 			}
 			l_pushback(cmd->redirections, re);
 			break;
-		case TOKEN_TYPE_ENDLINE:
-		case TOKEN_TYPE_SIMICOLON:
+		case TOKEN_TYPE_LINE_ENDING:
+		case TOKEN_TYPE_SEMICOLON:
 			if (!command_empty(cmd)) {
 				cmd->sep = CMD_SEPERATOR_END;
 				c = cmd;
@@ -731,17 +567,17 @@ static int parser_parse_token_print(struct parser *parser)
 {
 	int i, count;
 	struct lnode *node;
-	struct token *tok;
-	count = l_count(parser->toklist);
+	struct token *token;
+	count = l_count(parser->tokenlist);
 	printf("got %d tokens:\n", count);
-	for (i=0,node = parser->toklist->first; i< count; ++i,node = node->next) {
-		tok = node->data;
-		printf(" %d %d %d: ", i, tok->type, tok->flags);
-		if (tok->type == TOKEN_TYPE_ENDLINE) {
+	for (i=0,node = parser->tokenlist->first; i< count; ++i,node = node->next) {
+		token = node->data;
+		printf(" %d %d %d: ", i, token->type, token->flags);
+		if (token->type == TOKEN_TYPE_LINE_ENDING) {
 			printf("\\n");
 		}
 		else {
-			s_print(&tok->tok, stdout);
+			s_print(&token->value, stdout);
 		}
 		printf("\n");
 	}

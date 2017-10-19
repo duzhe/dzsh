@@ -1,0 +1,7 @@
+dzsh
+a.out
+*.o
+tags
+cscope.out
+*_test
+*.swp

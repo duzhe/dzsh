@@ -482,6 +482,7 @@ int main(int argc, char **argv)
 	struct lnode *node;
 	BOOL interactive;
 	BOOL line_complete;
+	int exitstatus;
 
 	/* global initialize */
 	static_pool = p_create(8196);
@@ -517,6 +518,7 @@ int main(int argc, char **argv)
 #endif
 	/* init */
 	pool = p_create(8192);
+	exitstatus = 0;
 
 	/* man loop */
 	/* 1. initialize 
@@ -581,6 +583,14 @@ int main(int argc, char **argv)
 					"long\n", argv[0]);
 			continue;
 		}
+		/* when syntax error occur and not in interactive mode, terminate */
+		if (retval == CMDLINE_PARSE_SYNTAX_ERROR) {
+			if (!interactive) {
+				fprintf(stderr, "%s: %s\n", argv[0], errmsg(parser));
+				exitstatus = 2;
+				break;
+			}
+		}
 		if (retval != CMDLINE_PARSE_DONE) {
 			fprintf(stderr, "%s: %s\n", argv[0], errmsg(parser));
 			continue;
@@ -597,5 +607,5 @@ int main(int argc, char **argv)
 	}
 	p_destroy(static_pool);
 	p_destroy(pool);
-	return 0;
+	return exitstatus;
 }
