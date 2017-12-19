@@ -87,48 +87,6 @@ int do_redirect(struct mempool *pool, struct list *redirections)
 }
 
 
-static int redirect_and_exec(struct mempool *pool, const char *bin,
-		char **params, char **envp, struct list *redirections, int fdin,
-		int fdout)
-{
-	int retval;
-	if (fdin != STDIN_FILENO) {
-		/*
-		fprintf(stderr, "pid: %d, dup2: %d ->  %d \n", getpid(), fdin, STDIN_FILENO);
-		*/
-		dup2(fdin, STDIN_FILENO);
-		close(fdin);
-	}
-	if (fdout != STDOUT_FILENO) {
-		/*
-		fprintf(stderr, "pid: %d, dup2: %d ->  %d \n", getpid(), fdout, STDOUT_FILENO);
-		*/
-		dup2(fdout, STDOUT_FILENO);
-		close(fdout);
-	}
-	if (do_redirect(pool, redirections) == -1) {
-		return -1;
-	}
-	if (bin != NULL) {
-		retval = execve(bin, params, envp);
-		if (retval == -1) {
-			fprintf(stderr, "errno: %d\n", errno);
-			switch(errno) {
-			case EACCES:
-				fprintf(stderr, "%s: %s: Permission denied\n", env->argv[0],
-						params[0]);
-				return 126;
-			default:
-				fprintf(stderr, "%s: %s Other Error\n", env->argv[0],
-						params[0]);
-				return 127;
-			}
-		}
-	}
-	return 0; 
-}
-
-
 static const char *getbinpathname(struct mempool *pool, struct str *bin,
 		struct list *pathentry)
 {
@@ -205,8 +163,8 @@ static int resolve(struct mempool *pool, struct simple_command *cmd)
 static int execute_command(struct mempool *pool, struct command *cmd);
 
 
-static int execute_simple(struct mempool *pool, struct simple_command *cmd,
-		struct list *sonpids, int fdin, int fdout)
+static int fork_and_exec(struct mempool *pool, struct simple_command *cmd,
+		pid_t *child_pid, int fdin, int fdout, pid_t pgid)
 {
 	int paramscount;
 	struct lnode *paramsnode;
@@ -216,7 +174,6 @@ static int execute_simple(struct mempool *pool, struct simple_command *cmd,
 	pid_t pid;
 	pid_t *pidpointer;
 	int retval;
-	int exitstatus;
 
 	/* get an array form 'params' */
 	paramscount = l_count(cmd->params);
@@ -243,7 +200,7 @@ static int execute_simple(struct mempool *pool, struct simple_command *cmd,
 		envp = NULL;
 	}
 
-	/* fork and execute */
+	/* fork and exec */
 	pid = fork();
 	if (pid == -1) {
 		fprintf(stderr, "%s\n", strerror(errno));
@@ -257,21 +214,61 @@ static int execute_simple(struct mempool *pool, struct simple_command *cmd,
 			p_destroy(pool);
 			exit(retval);
 		}
-		/* on success, redirect and exec will not return */
-		retval = redirect_and_exec(pool, cmd->bin, params, envp,
-				cmd->redirections, fdin, fdout);
+		/* set group id */
+		setpgid(0, pgid);
+		/* do redirect */
+		if (fdin != STDIN_FILENO) {
+			dup2(fdin, STDIN_FILENO);
+			close(fdin);
+		}
+		if (fdout != STDOUT_FILENO) {
+			dup2(fdout, STDOUT_FILENO);
+			close(fdout);
+		}
+		if (do_redirect(pool, cmd->redirections) == -1) {
+			return -1;
+		}
+		/* exec */
+		if (cmd->bin != NULL) {
+			retval = execve(cmd->bin, params, envp);
+			if (retval == -1) {
+				fprintf(stderr, "errno: %d\n", errno);
+				switch(errno) {
+				case EACCES:
+					fprintf(stderr, "%s: %s: Permission denied\n", env->argv[0],
+							params[0]);
+					retval = 126;
+					break;
+				default:
+					fprintf(stderr, "%s: %s Other Error\n", env->argv[0],
+							params[0]);
+					retval = 127;
+					break;
+				}
+			}
+		}
 		p_destroy(pool);
 		exit(retval);
 	}
 	/* save son process pid */
-	if (sonpids != NULL) {
-		pidpointer = p_alloc(pool, sizeof(pid_t));
-		*pidpointer = pid;
-		l_pushback(sonpids, pidpointer);
-		return 0;
+	if (child_pid != NULL) {
+		*child_pid = pid;
 	}
-	waitpid(pid, &exitstatus, 0);
-	return exitstatus;
+	return 0;
+}
+
+static int execute_simple(struct mempool *pool, struct simple_command *cmd,
+		int fdin, int fdout)
+{
+	pid_t child_pid;
+	int retval;
+
+	retval = fork_and_exec(pool, cmd, &child_pid, fdin, fdout, 0);
+	if (retval != 0) {
+		return retval;
+	}
+	waitpid(child_pid, &retval, 0);
+	return retval;
 }
 
 
@@ -280,15 +277,20 @@ static int execute_pipe(struct mempool *pool, struct complex_command *cmd)
 	int fdin, fdout;
 	struct lnode *node;
 	struct simple_command *curr;
-	struct list *sonpids;
+	struct list *children_pid;
 	int pipefd[2];
 	int retval;
 	pid_t *pidpointer;
+	pid_t child_pid;
 	int exitstatus;
+	pid_t pgid;
 
 	fdin = STDIN_FILENO;
 	fdout = STDOUT_FILENO;
-	sonpids = l_create(pool);
+	children_pid = l_create(pool);
+	/* use 0 as first child process group id , so it will create a new group;
+	 * then use it's process id as group id */
+	pgid = 0;
 
 	for (node = cmd->commands->first; node != NULL;
 			node = node->next) {
@@ -314,7 +316,13 @@ static int execute_pipe(struct mempool *pool, struct complex_command *cmd)
 			fdout = STDOUT_FILENO;
 		}
 		/* now we asume that there are only simple command in pipe command */
-		execute_simple(pool, curr, sonpids, fdin, fdout);
+		fork_and_exec(pool, curr, &child_pid, fdin, fdout, pgid);
+		pidpointer = p_alloc(pool, sizeof(pid_t));
+		*pidpointer = child_pid;
+		l_pushback(children_pid, pidpointer);
+		if (pgid == 0) {
+			pgid = child_pid;
+		}
 		/* if 'fdin' or 'fdout' is pipe, close it */
 		if (fdin != STDIN_FILENO) {
 			close(fdin);
@@ -325,7 +333,7 @@ static int execute_pipe(struct mempool *pool, struct complex_command *cmd)
 		fdin = pipefd[0];
 	}
 	/* after the last fork, wait for all son process */
-	for (node = sonpids->first; node != NULL; 
+	for (node = children_pid->first; node != NULL; 
 			node = node->next) {
 		pidpointer = node->data;
 		waitpid(*pidpointer, &exitstatus, 0);
@@ -365,7 +373,7 @@ static int execute_command(struct mempool *pool, struct command *cmd)
 {
 	switch(cmd->type) {
 		case CMD_TYPE_SIMPLE:
-			return  execute_simple(pool, (struct simple_command *)cmd, NULL,
+			return  execute_simple(pool, (struct simple_command *)cmd,
 					STDIN_FILENO, STDOUT_FILENO);
 		case CMD_TYPE_PIPE:
 			return execute_pipe(pool, (struct complex_command *)cmd);
