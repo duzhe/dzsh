@@ -172,7 +172,6 @@ static int fork_and_exec(struct mempool *pool, struct simple_command *cmd,
 	char **envp;
 	int i;
 	pid_t pid;
-	pid_t *pidpointer;
 	int retval;
 
 	/* get an array form 'params' */
@@ -215,7 +214,9 @@ static int fork_and_exec(struct mempool *pool, struct simple_command *cmd,
 			exit(retval);
 		}
 		/* set group id */
-		setpgid(0, pgid);
+		/* if we use new group, we should also process foreground process group/
+		 * job control and signal things, so disable it */
+		/* setpgid(0, pgid); */
 		/* do redirect */
 		if (fdin != STDIN_FILENO) {
 			dup2(fdin, STDIN_FILENO);
@@ -267,6 +268,9 @@ static int execute_simple(struct mempool *pool, struct simple_command *cmd,
 	if (retval != 0) {
 		return retval;
 	}
+	/*
+	tcsetpgrp(STDIN_FILENO, child_pid);
+	*/
 	waitpid(child_pid, &retval, 0);
 	return retval;
 }
